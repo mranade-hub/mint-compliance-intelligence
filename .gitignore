@@ -1,0 +1,26 @@
+# Python caches & environments
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+.env
+
+# Google Drive API & Auth
+credentials.json
+token.json
+
+# Playwright AI Session
+session.json
+
+# App-specific generated folders and files
+downloads/
+temp_downloads/
+logs/
+audit_history/
+*.pdf
+*.zip
+
+# OS generated files
+.DS_Store
+Thumbs.db
