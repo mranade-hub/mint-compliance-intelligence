@@ -87,10 +87,14 @@ class WolfgangClient:
 
         page.locator("#input-menu-button").click()
 
+        # Added micro-pause to let Melt UI dropdown animations finish
+        page.wait_for_timeout(500)
+
+        # Force the click to bypass Playwright's stability wait
         page.locator(
             '[data-melt-dropdown-menu-item]',
             has_text="Upload Files"
-        ).click()
+        ).click(force=True)
 
         page.wait_for_selector("input[type=file]", state="attached")
         page.locator("input[type=file]").first.set_input_files(file_path)
@@ -144,16 +148,21 @@ class WolfgangClient:
 
         page.click("#input-menu-button")
 
+        # Added micro-pause to let Melt UI dropdown animations finish
+        page.wait_for_timeout(500)
+
+        # Force the click to bypass Playwright's stability wait
         page.locator(
             '[data-melt-dropdown-menu-item]',
             has_text="Upload Files"
-        ).click()
+        ).click(force=True)
 
         # hidden input — DO NOT wait for visible
         file_input = page.locator("input[type=file]").first
         file_input.set_input_files(file_paths)
 
         page.wait_for_timeout(5000)
+
     # ---------------------------------
 
     def close(self):
