@@ -26,25 +26,63 @@ from drive_utils import (
     download_folder_recursively
 )
 
-st.set_page_config(layout="wide", page_title="MINT Compliance Intelligence")
+st.set_page_config(layout="wide", page_title="MINT Command Center", initial_sidebar_state="expanded")
 
 # =====================================================
-# CONFIGURATION
+# CONFIGURATION & SESSION STATE
 # =====================================================
-# 🔴 REPLACE THIS WITH YOUR MAIN AUDIT FOLDER ID
 MAIN_AUDIT_FOLDER_ID = "0BxOKDhjJWW08dk5lTXQ1M09XaVk" 
-TEMP_DOWNLOAD_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "temp_downloads") 
+
+if "audit_results" not in st.session_state:
+    st.session_state.audit_results = None
+if "audit_company" not in st.session_state:
+    st.session_state.audit_company = None
 
 # =====================================================
-# ENTERPRISE STYLING
+# HIGH-CONTRAST "CONTROL ROOM" STYLING
 # =====================================================
 st.markdown("""
 <style>
-.block-container { padding-top: 2rem; padding-bottom: 2rem; }
-.kpi-card { background-color: #F8F9FA; padding: 20px; border-radius: 12px; text-align: center; }
-.kpi-title { font-size: 14px; color: #6c757d; }
-.kpi-value { font-size: 28px; font-weight: 600; }
-.exec-banner { background-color: #EDF2F7; padding: 25px; border-radius: 14px; }
+/* Sidebar styling */
+[data-testid="stSidebar"] {
+    background-color: #1E1E2F;
+    color: white;
+}
+/* KPI Cards */
+.kpi-container {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 30px;
+}
+.kpi-card-dark {
+    background-color: #2D2D44;
+    border-left: 5px solid #00FFC4;
+    padding: 20px;
+    border-radius: 8px;
+    flex: 1;
+    color: white;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+.kpi-title-dark {
+    font-size: 14px;
+    color: #A0A0B5;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.kpi-value-dark {
+    font-size: 36px;
+    font-weight: 700;
+    margin-top: 10px;
+    color: #FFFFFF;
+}
+/* Sections */
+.section-header {
+    border-bottom: 2px solid #E2E8F0;
+    padding-bottom: 10px;
+    margin-top: 40px;
+    margin-bottom: 20px;
+    color: #1E293B;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -65,17 +103,6 @@ def save_audit_history(company, results):
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     with open(f"audit_history/{company}_{timestamp}.json", "w") as f:
         json.dump(results, f)
-
-def load_company_history(company):
-    if not os.path.exists("audit_history"): return []
-    history = []
-    for file in os.listdir("audit_history"):
-        if file.startswith(company):
-            with open(os.path.join("audit_history", file)) as f:
-                data = json.load(f)
-                data["timestamp"] = file.split("_")[1]
-                history.append(data)
-    return sorted(history, key=lambda x: x["timestamp"])
 
 def generate_pdf(company, results):
     pdf = FPDF()
@@ -100,156 +127,154 @@ def top_gaps(results):
     return sorted(gaps, key=lambda x: x[2])[:5]
 
 # =====================================================
-# UI START: UNIFIED FLOW
+# SIDEBAR: SETUP & INGESTION
 # =====================================================
-st.title("MINT Compliance Intelligence Platform")
-
-# --- STEP 1: PROJECT DETAILS ---
-st.markdown("### 1. Project Details")
-col_a, col_b = st.columns(2)
-with col_a:
+with st.sidebar:
+    st.title("⚙️ Setup")
+    
     company = st.text_input("Company Name")
-with col_b:
     project_type = st.selectbox(
         "Project Type",
         ["New Project", "Transitioned Project", "SubContracted Project", "Reseller Project"]
     )
+    
+    st.divider()
+    
+    st.subheader("Data Source")
+    data_source = st.radio("Fetch method:", ["☁️ Google Drive", "📁 Local ZIP File"])
+    
+    target_zip_for_audit = None
+    drive_ready = False
+    
+    # LOCAL ZIP
+    if data_source == "📁 Local ZIP File":
+        uploaded_file = st.file_uploader("Upload ZIP", type="zip")
+        if uploaded_file:
+            target_zip_for_audit = uploaded_file
+            
+    # GOOGLE DRIVE
+    elif data_source == "☁️ Google Drive":
+        if "matching_folders" not in st.session_state: st.session_state.matching_folders = []
+        if "has_searched" not in st.session_state: st.session_state.has_searched = False
 
-st.divider()
-
-# --- STEP 2: GET DATA ---
-st.markdown("### 2. Provide Project Data")
-data_source = st.radio("Select Data Source:", ["☁️ Fetch from Google Drive", "📁 Upload Local ZIP File"], horizontal=True)
-
-target_zip_for_audit = None
-
-if data_source == "📁 Upload Local ZIP File":
-    uploaded_file = st.file_uploader("Upload Project ZIP", type="zip")
-    if uploaded_file:
-        target_zip_for_audit = uploaded_file
-
-elif data_source == "☁️ Fetch from Google Drive":
-    if "matching_folders" not in st.session_state: st.session_state.matching_folders = []
-    if "has_searched" not in st.session_state: st.session_state.has_searched = False
-
-    col_search, col_btn = st.columns([4, 1])
-    with col_search:
-        search_term = st.text_input("Search Drive", placeholder="e.g., Acme Corp...", label_visibility="collapsed")
-    with col_btn:
+        search_term = st.text_input("Search Drive Folders")
         if st.button("Search", use_container_width=True):
-            if not search_term:
-                st.warning("⚠️ Enter a search term.")
-            else:
+            if search_term:
                 try:
                     drive_service = get_drive_service()
                     if drive_service:
-                        with st.spinner("Querying Google Drive..."):
+                        with st.spinner("Querying Drive..."):
                             results = search_folders_by_name(drive_service, search_term, MAIN_AUDIT_FOLDER_ID)
                             st.session_state.matching_folders = results
                             st.session_state.has_searched = True
-                            if results: st.toast(f"Found {len(results)} matches!", icon="✅")
                 except Exception as e:
                     st.error(f"Search failed: {e}")
 
-    if st.session_state.has_searched:
-        if not st.session_state.matching_folders:
-            st.info("No folders found. Try a different spelling.")
-        else:
+        if st.session_state.has_searched and st.session_state.matching_folders:
             drive_service = get_drive_service()
-            
-            main_options = {f"{f['name']} (ID: {f['id']})": f for f in st.session_state.matching_folders}
+            main_options = {f"{f['name']}": f for f in st.session_state.matching_folders}
             selected_main = st.selectbox("Select Main Folder:", options=list(main_options.keys()))
             selected_main_folder = main_options[selected_main]
             
+            # --- RESTORED SUBFOLDER LOGIC ---
             with st.spinner("Fetching subfolders..."):
                 subfolders = get_subfolders(drive_service, selected_main_folder['id'])
             
             target_options = {f"📦 ENTIRE '{selected_main_folder['name']}' Folder": selected_main_folder}
-            for sf in subfolders: target_options[f"📁 Subfolder: {sf['name']}"] = sf
+            for sf in subfolders: 
+                target_options[f"📁 Subfolder: {sf['name']}"] = sf
                 
             selected_target = st.selectbox("Select contents to download:", options=list(target_options.keys()))
             target_folder = target_options[selected_target]
-            
-            if st.button("⬇️ Download & Prepare for Audit", type="secondary"):
-                try:
-                    if os.path.exists(TEMP_DOWNLOAD_DIR): shutil.rmtree(TEMP_DOWNLOAD_DIR)
-                    base_path = os.path.join(TEMP_DOWNLOAD_DIR, target_folder['name'])
-                    
-                    my_bar = st.progress(0, text="Downloading files from Google Drive...")
-                    
-                    with st.spinner(f"Pulling data for '{target_folder['name']}'..."):
-                        my_bar.progress(30, text="Traversing folders and downloading...")
-                        download_folder_recursively(drive_service, target_folder['id'], base_path)
-                    
-                    my_bar.progress(80, text="Compressing into a ZIP file...")
-                    
-                    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-                    zip_path = os.path.join(SCRIPT_DIR, target_folder['name'])
-                    shutil.make_archive(zip_path, 'zip', TEMP_DOWNLOAD_DIR)
-                    
-                    st.session_state.drive_zip_path = f"{zip_path}.zip"
-                    
-                    if os.path.exists(TEMP_DOWNLOAD_DIR): shutil.rmtree(TEMP_DOWNLOAD_DIR)
-                    
-                    my_bar.progress(100, text="Complete!")
-                    st.success("🎉 Download complete!")
-                    
-                except Exception as e:
-                    st.error(f"Download failed: {e}")
+            # --------------------------------
 
-    # If the user successfully downloaded a zip, set it as the target
-    if "drive_zip_path" in st.session_state and os.path.exists(st.session_state.drive_zip_path):
-        st.info(f"✅ Loaded Drive File: `{os.path.basename(st.session_state.drive_zip_path)}`")
-        target_zip_for_audit = st.session_state.drive_zip_path
+            if st.button("⬇️ Download Files", type="primary", use_container_width=True):
+                if not company:
+                    st.error("Enter Company Name first!")
+                else:
+                    try:
+                        # SUPER SPEED UP: Download directly into the pipeline's expected folder.
+                        target_dir = f"downloads/{company}"
+                        if os.path.exists(target_dir): shutil.rmtree(target_dir)
+                        os.makedirs(target_dir, exist_ok=True)
+                        
+                        with st.spinner("Downloading directly to pipeline..."):
+                            # Using target_folder ID so it respects subfolder choice
+                            download_folder_recursively(drive_service, target_folder['id'], target_dir)
+                        
+                        st.success("Files ready!")
+                        drive_ready = True
+                    except Exception as e:
+                        st.error(f"Download failed: {e}")
 
-st.divider()
+    st.divider()
+    
+    # EXECUTION BUTTON
+    if st.button("🚀 RUN AUDIT", type="primary", use_container_width=True):
+        if not company:
+            st.error("Provide a Company Name.")
+        elif data_source == "📁 Local ZIP File" and not target_zip_for_audit:
+            st.error("Upload a ZIP file.")
+        elif data_source == "☁️ Google Drive" and not drive_ready and not os.path.exists(f"downloads/{company}"):
+            st.error("Download files from Drive first.")
+        else:
+            with st.spinner("Running MINT Compliance Engine..."):
+                # Only extract if we are using a local ZIP. Drive files are already in place!
+                if target_zip_for_audit:
+                    extract_zip(target_zip_for_audit, company)
+                    
+                results = run_pipeline(company, project_type)
+                save_audit_history(company, results)
+                
+                # Save to session state to prevent refresh bugs
+                st.session_state.audit_results = results
+                st.session_state.audit_company = company
 
-# --- STEP 3: RUN AUDIT ---
-st.markdown("### 3. Execution")
-if st.button("🚀 Run Compliance Audit", type="primary", use_container_width=True):
-    if not company:
-        st.error("⚠️ Please provide a Company Name in Step 1.")
-        st.stop()
-    if not target_zip_for_audit:
-        st.error("⚠️ Please either upload a ZIP or download a folder from Drive in Step 2.")
-        st.stop()
 
-    with st.spinner("Running Compliance Intelligence Engine... This may take a few minutes."):
-        extract_zip(target_zip_for_audit, company)
-        results = run_pipeline(company, project_type)
+# =====================================================
+# MAIN DASHBOARD AREA (TOP-DOWN NARRATIVE)
+# =====================================================
 
-    save_audit_history(company, results)
-
-    # -----------------------------------------------------
-    # RENDER RESULTS
-    # -----------------------------------------------------
+if st.session_state.audit_results is None:
+    st.title("MINT Command Center")
+    st.info("👈 Use the setup menu on the left to configure and run an audit.")
+else:
+    results = st.session_state.audit_results
+    comp = st.session_state.audit_company
+    
     overall = results["overall_score"]
     maturity = maturity_level(overall)
-    benchmark = 68  
+    
+    total_docs = sum(len(p["documents"]) for p in results["phases"].values())
+    passed_docs = sum(1 for p in results["phases"].values() for d in p["documents"] if d["pass"])
+    pass_rate = round(passed_docs/total_docs*100,1) if total_docs > 0 else 0
 
-    st.markdown("## Executive Intelligence Summary")
+    st.title(f"Intelligence Brief: {comp}")
+    st.caption(f"Risk Level: {results['risk_level']} | Detected Phase: {results['detected_phase']}")
+
+    # --- ROW 1: KPI CARDS ---
     st.markdown(f"""
-    <div class="exec-banner">
-        <b>Overall Compliance:</b> {overall}% ({maturity})<br>
-        <b>Benchmark:</b> {benchmark}%<br>
-        <b>Variance:</b> {overall - benchmark:+}%<br><br>
-        {results['executive_summary']}
+    <div class="kpi-container">
+        <div class="kpi-card-dark">
+            <div class="kpi-title-dark">Overall Compliance</div>
+            <div class="kpi-value-dark">{overall}%</div>
+        </div>
+        <div class="kpi-card-dark" style="border-left-color: #FF007F;">
+            <div class="kpi-title-dark">Maturity Status</div>
+            <div class="kpi-value-dark">{maturity}</div>
+        </div>
+        <div class="kpi-card-dark" style="border-left-color: #0088FF;">
+            <div class="kpi-title-dark">Pass Rate</div>
+            <div class="kpi-value-dark">{pass_rate}%</div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📊 Executive View", "⚠ Risk & Gaps", "📂 Phase Analytics", "📈 Trends", "📄 Reports"]
-    )
-
-    with tab1:
-        total_docs = sum(len(p["documents"]) for p in results["phases"].values())
-        passed_docs = sum(1 for p in results["phases"].values() for d in p["documents"] if d["pass"])
-
-        col1, col2, col3 = st.columns(3)
-        col1.markdown(f'<div class="kpi-card"><div class="kpi-title">Overall Score</div><div class="kpi-value">{overall}%</div></div>', unsafe_allow_html=True)
-        col2.markdown(f'<div class="kpi-card"><div class="kpi-title">Maturity Level</div><div class="kpi-value">{maturity}</div></div>', unsafe_allow_html=True)
-        col3.markdown(f'<div class="kpi-card"><div class="kpi-title">Pass Rate</div><div class="kpi-value">{round(passed_docs/total_docs*100,1) if total_docs > 0 else 0}%</div></div>', unsafe_allow_html=True)
-
+    # --- ROW 2: RADAR & GAPS ---
+    st.markdown('<h3 class="section-header">Performance & Vulnerabilities</h3>', unsafe_allow_html=True)
+    col1, col2 = st.columns([1.2, 1])
+    
+    with col1:
         phase_names, phase_scores = [], []
         for phase, info in results["phases"].items():
             phase_names.append(phase)
@@ -259,96 +284,57 @@ if st.button("🚀 Run Compliance Audit", type="primary", use_container_width=Tr
         radar.add_trace(go.Scatterpolar(
             r=phase_scores + [phase_scores[0]] if phase_scores else [],
             theta=phase_names + [phase_names[0]] if phase_names else [],
-            fill='toself', line=dict(color='#264653', width=3), fillcolor='rgba(38, 70, 83, 0.3)'
+            fill='toself', line=dict(color='#00FFC4', width=3), fillcolor='rgba(0, 255, 196, 0.1)'
         ))
-        radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), template="plotly_white", showlegend=False)
+        radar.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 100])), 
+            margin=dict(l=40, r=40, t=20, b=20),
+            height=350
+        )
         st.plotly_chart(radar, use_container_width=True)
 
-    with tab2:
-        st.subheader("Priority Remediation Targets")
+    with col2:
+        st.markdown("#### Priority Remediation Targets")
         gaps = top_gaps(results)
-        
         if not gaps:
             st.success("No major compliance gaps found! 🎉")
         else:
-            # 1. Interactive Expanders for Gaps
-            for g in gaps:
-                phase, doc, score = g
-                
+            for phase, doc, score in gaps:
                 ai_comment = "No specific comment provided."
                 for d in results["phases"][phase]["documents"]:
                     if d["document"] == doc:
                         ai_comment = d.get("comment", ai_comment)
                         break
 
-                with st.expander(f"🚨 {phase} Phase: {doc} (Score: {score}%)"):
-                    st.write(f"**AI Assessment:** {ai_comment}")
-                    st.info("Action Required: Please ensure a completed, project-specific version of this document is uploaded.")
+                with st.expander(f"🚨 {doc} ({score}%)"):
+                    st.write(f"**Phase:** {phase}")
+                    st.write(f"**AI Diagnostics:** {ai_comment}")
 
-        st.divider()
+    # --- ROW 3: HEATMAP ---
+    st.markdown('<h3 class="section-header">Phase Analytics Heatmap</h3>', unsafe_allow_html=True)
+    heat_data = [{"Phase": phase, "Document": d["document"], "Score": d["score"]} for phase, info in results["phases"].items() for d in info["documents"]]
+    if heat_data:
+        heat_df = pd.DataFrame(heat_data)
+        pivot = heat_df.pivot(index="Document", columns="Phase", values="Score")
+        heatmap = px.imshow(pivot, color_continuous_scale="RdYlGn", aspect="auto")
+        heatmap.update_layout(height=400, margin=dict(l=0, r=0, t=0, b=0))
+        st.plotly_chart(heatmap, use_container_width=True)
+
+    # --- ROW 4: ARTIFACTS ---
+    st.markdown('<h3 class="section-header">Export Artifacts</h3>', unsafe_allow_html=True)
+    dl_col1, dl_col2 = st.columns(2)
+
+    with dl_col1:
+        pdf_path = generate_pdf(comp, results)
+        with open(pdf_path, "rb") as f:
+            st.download_button("📄 Download Executive PDF", f, file_name=pdf_path, mime="application/pdf", use_container_width=True)
+
+    with dl_col2:
+        csv_data = []
+        for phase, info in results["phases"].items():
+            for d in info["documents"]:
+                csv_data.append({"Phase": phase, "Document": d["document"], "Status": "Pass" if d["pass"] else "Fail", "Score": d["score"], "AI Comment": d.get("comment", "")})
         
-        # 2. Auto-Drafted Remediation Email
-        st.subheader("✉️ Auto-Drafted Remediation Email")
-        st.caption("Copy and paste this message directly to the Project Manager.")
-        
-        email_body = f"Hi Team,\n\nThe recent MINT compliance audit for {company} resulted in a score of {overall}%. Please address the following priority gaps:\n\n"
-        for g in gaps:
-            email_body += f"- {g[0]} Phase: {g[1]} (Score: {g[2]}%)\n"
-        email_body += "\nPlease upload the corrected files to the project folder so we can re-run the audit.\n\nThank you,\n[Your Name/Compliance Team]"
-        
-        st.text_area("Email Template", value=email_body, height=250, label_visibility="collapsed")
-
-    with tab3:
-        heat_data = [{"Phase": phase, "Document": d["document"], "Score": d["score"]} for phase, info in results["phases"].items() for d in info["documents"]]
-        if heat_data:
-            heat_df = pd.DataFrame(heat_data)
-            pivot = heat_df.pivot(index="Document", columns="Phase", values="Score")
-            heatmap = px.imshow(pivot, color_continuous_scale="RdYlGn", aspect="auto", template="plotly_white")
-            st.plotly_chart(heatmap, use_container_width=True)
-
-    with tab4:
-        history = load_company_history(company)
-        if len(history) > 1:
-            trend_df = pd.DataFrame([{"Timestamp": h["timestamp"], "Score": h["overall_score"]} for h in history])
-            trend_chart = px.line(trend_df, x="Timestamp", y="Score", markers=True, template="plotly_white")
-            st.plotly_chart(trend_chart, use_container_width=True)
-        else:
-            st.info("Run another audit later to unlock trend analytics.")
-
-    with tab5:
-        st.subheader("Download Audit Artifacts")
-        col1, col2 = st.columns(2)
-
-        with col1:
-            pdf_path = generate_pdf(company, results)
-            with open(pdf_path, "rb") as f:
-                st.download_button(
-                    "📄 Download Executive PDF Report", 
-                    f, 
-                    file_name=pdf_path, 
-                    mime="application/pdf",
-                    use_container_width=True
-                )
-
-        with col2:
-            csv_data = []
-            for phase, info in results["phases"].items():
-                for d in info["documents"]:
-                    csv_data.append({
-                        "Phase": phase,
-                        "Document": d["document"],
-                        "Status": "Pass" if d["pass"] else "Fail",
-                        "Score": d["score"],
-                        "AI Comment": d.get("comment", "")
-                    })
-            
-            csv_df = pd.DataFrame(csv_data)
-            csv_bytes = csv_df.to_csv(index=False).encode('utf-8')
-
-            st.download_button(
-                label="📊 Download Raw Audit Data (CSV)",
-                data=csv_bytes,
-                file_name=f"{company}_Audit_Data.csv",
-                mime="text/csv",
-                use_container_width=True
-            )
+        csv_df = pd.DataFrame(csv_data)
+        csv_bytes = csv_df.to_csv(index=False).encode('utf-8')
+        st.download_button("📊 Download Audit CSV", data=csv_bytes, file_name=f"{comp}_Audit.csv", mime="text/csv", use_container_width=True)
