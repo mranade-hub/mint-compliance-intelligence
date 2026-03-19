@@ -57,7 +57,8 @@ def maturity_level(score):
     elif score >= 50: return "Developing"
     else: return "Emerging"
 
-def clean_text(text): return re.sub(r'[^\x00-\x7F]+', '', str(text))
+def clean_text(text): 
+    return re.sub(r'[^\x00-\x7F]+', '', str(text))
 
 def save_audit_history(company, results):
     os.makedirs("audit_history", exist_ok=True)
@@ -214,14 +215,13 @@ if st.button("🚀 Run Compliance Audit", type="primary", use_container_width=Tr
         st.stop()
 
     with st.spinner("Running Compliance Intelligence Engine... This may take a few minutes."):
-        # target_zip_for_audit is either the st.file_uploader object OR the local file path string
         extract_zip(target_zip_for_audit, company)
         results = run_pipeline(company, project_type)
 
     save_audit_history(company, results)
 
     # -----------------------------------------------------
-    # RENDER RESULTS (Same as your original code)
+    # RENDER RESULTS
     # -----------------------------------------------------
     overall = results["overall_score"]
     maturity = maturity_level(overall)
@@ -267,7 +267,36 @@ if st.button("🚀 Run Compliance Audit", type="primary", use_container_width=Tr
     with tab2:
         st.subheader("Priority Remediation Targets")
         gaps = top_gaps(results)
-        for g in gaps: st.error(f"{g[0]} → {g[1]} ({g[2]}%)")
+        
+        if not gaps:
+            st.success("No major compliance gaps found! 🎉")
+        else:
+            # 1. Interactive Expanders for Gaps
+            for g in gaps:
+                phase, doc, score = g
+                
+                ai_comment = "No specific comment provided."
+                for d in results["phases"][phase]["documents"]:
+                    if d["document"] == doc:
+                        ai_comment = d.get("comment", ai_comment)
+                        break
+
+                with st.expander(f"🚨 {phase} Phase: {doc} (Score: {score}%)"):
+                    st.write(f"**AI Assessment:** {ai_comment}")
+                    st.info("Action Required: Please ensure a completed, project-specific version of this document is uploaded.")
+
+        st.divider()
+        
+        # 2. Auto-Drafted Remediation Email
+        st.subheader("✉️ Auto-Drafted Remediation Email")
+        st.caption("Copy and paste this message directly to the Project Manager.")
+        
+        email_body = f"Hi Team,\n\nThe recent MINT compliance audit for {company} resulted in a score of {overall}%. Please address the following priority gaps:\n\n"
+        for g in gaps:
+            email_body += f"- {g[0]} Phase: {g[1]} (Score: {g[2]}%)\n"
+        email_body += "\nPlease upload the corrected files to the project folder so we can re-run the audit.\n\nThank you,\n[Your Name/Compliance Team]"
+        
+        st.text_area("Email Template", value=email_body, height=250, label_visibility="collapsed")
 
     with tab3:
         heat_data = [{"Phase": phase, "Document": d["document"], "Score": d["score"]} for phase, info in results["phases"].items() for d in info["documents"]]
@@ -287,6 +316,39 @@ if st.button("🚀 Run Compliance Audit", type="primary", use_container_width=Tr
             st.info("Run another audit later to unlock trend analytics.")
 
     with tab5:
-        pdf_path = generate_pdf(company, results)
-        with open(pdf_path, "rb") as f:
-            st.download_button("Download Executive PDF Report", f, file_name=pdf_path, mime="application/pdf")
+        st.subheader("Download Audit Artifacts")
+        col1, col2 = st.columns(2)
+
+        with col1:
+            pdf_path = generate_pdf(company, results)
+            with open(pdf_path, "rb") as f:
+                st.download_button(
+                    "📄 Download Executive PDF Report", 
+                    f, 
+                    file_name=pdf_path, 
+                    mime="application/pdf",
+                    use_container_width=True
+                )
+
+        with col2:
+            csv_data = []
+            for phase, info in results["phases"].items():
+                for d in info["documents"]:
+                    csv_data.append({
+                        "Phase": phase,
+                        "Document": d["document"],
+                        "Status": "Pass" if d["pass"] else "Fail",
+                        "Score": d["score"],
+                        "AI Comment": d.get("comment", "")
+                    })
+            
+            csv_df = pd.DataFrame(csv_data)
+            csv_bytes = csv_df.to_csv(index=False).encode('utf-8')
+
+            st.download_button(
+                label="📊 Download Raw Audit Data (CSV)",
+                data=csv_bytes,
+                file_name=f"{company}_Audit_Data.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
