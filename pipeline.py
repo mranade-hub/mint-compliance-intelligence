@@ -7,82 +7,23 @@ from compliance_matrix import COMPLIANCE_MATRIX
 
 PHASE_ORDER = list(COMPLIANCE_MATRIX.keys())
 
-
-def weighted_doc_score(quality):
-    if not quality:
-        return 0
-
-    score = 0
-    if quality.get("appears_filled"):
-        score += 30
-    if quality.get("contains_project_content"):
-        score += 30
-    if not quality.get("appears_template_only"):
-        score += 20
-    if quality.get("document_type_correct"):
-        score += 20
-    return score
-
-
-def calculate_phase_score(results):
-    if not results:
-        return 0
-    total = sum(r["score"] for r in results)
-    return round(total / len(results), 2)
-
-
-def detect_current_phase(final):
-    detected = PHASE_ORDER[0]
-    for phase in PHASE_ORDER:
-        if final[phase]["score"] >= 70:
-            detected = phase
-        else:
-            break
-    return detected
-
-
-def risk_classification(score):
-    if score >= 85:
-        return "🟢 Low Risk"
-    elif score >= 70:
-        return "🟡 Moderate Risk"
-    elif score >= 50:
-        return "🟠 High Risk"
-    else:
-        return "🔴 Critical Risk"
-
-
-def locate_files(base_path, doc_name):
-    matches = []
-    keywords = [w.lower() for w in doc_name.split() if len(w) > 3]
-
-    for root, _, files in os.walk(base_path):
-        for f in files:
-            fname = f.lower()
-            if any(k in fname for k in keywords):
-                matches.append(os.path.join(root, f))
-    return matches
-
-
-def run_pipeline(company, project_type):
+def run_pipeline(company, project_type, log_callback=None, progress_callback=None):
     base = f"downloads/{company}"
+    
+    if log_callback: log_callback(f"[SYSTEM] Extracting directory structure for {company}...")
     structure_text = extract_structure(base)
 
+    if log_callback: log_callback("[SYSTEM] Booting Wolfgang Client & authenticating session...")
     wolfgang = WolfgangClient()
 
     try:
-        # ===============================
-        # STRUCTURE VALIDATION
-        # ===============================
+        if log_callback: log_callback("[SYSTEM] Running initial folder structure validation...")
         structure_result = ai_structure_validation(
             structure_text,
             project_type,
             wolfgang
         )
 
-        # ===============================
-        # COLLECT FILES
-        # ===============================
         all_files = []
         for root, _, files in os.walk(base):
             for f in files:
@@ -90,14 +31,18 @@ def run_pipeline(company, project_type):
 
         all_files = list(set(all_files))
 
-        # ===============================
-        # AI DOCUMENT AUDIT
-        # ===============================
+        if log_callback: log_callback(f"[SYSTEM] Found {len(all_files)} total files. Beginning deep audit...")
+
+        # Pass the callbacks to the batch processor
         ai_results = ai_deep_audit_batch(
             "Full Project",
             all_files,
-            wolfgang
+            wolfgang,
+            log_callback=log_callback,
+            progress_callback=progress_callback
         )
+
+        if log_callback: log_callback("[SYSTEM] Deep audit complete. Calculating final maturity scores...")
 
         from collections import defaultdict
         compliance_map = defaultdict(list)
@@ -108,9 +53,6 @@ def run_pipeline(company, project_type):
                 if compliance_type:
                     compliance_map[compliance_type].append(item)
 
-        # ===============================
-        # BUILD PHASE RESULTS
-        # ===============================
         final = {}
 
         for phase in PHASE_ORDER:
@@ -130,33 +72,25 @@ def run_pipeline(company, project_type):
                     })
                     continue
 
-                # ✅ FIXED SCORING LOGIC
                 best_score = -1
                 best_quality = None
 
                 for q in qualities:
                     score = 0
-
-                    if q.get("appears_filled"):
-                        score += 30
-                    if q.get("contains_project_content"):
-                        score += 30
-                    if not q.get("appears_template_only"):
-                        score += 20
-                    if q.get("document_type_correct"):
-                        score += 20
+                    if q.get("appears_filled"): score += 30
+                    if q.get("contains_project_content"): score += 30
+                    if not q.get("appears_template_only"): score += 20
+                    if q.get("document_type_correct"): score += 20
 
                     if score > best_score:
                         best_score = score
                         best_quality = q
 
-                # ✅ SAFETY FALLBACK
                 if best_quality is None:
                     best_quality = {}
                     best_score = 0
 
                 comment = best_quality.get("comment", "")
-
                 if not comment:
                     if best_score >= 70:
                         comment = "Document appears complete and compliant."
@@ -171,12 +105,8 @@ def run_pipeline(company, project_type):
                     "comment": comment
                 })
 
-            # ✅ SAFE AVERAGE CALCULATION
             if phase_results:
-                avg_score = round(
-                    sum(d["score"] for d in phase_results) / len(phase_results),
-                    2
-                )
+                avg_score = round(sum(d["score"] for d in phase_results) / len(phase_results), 2)
             else:
                 avg_score = 0
 
@@ -185,11 +115,7 @@ def run_pipeline(company, project_type):
                 "score": avg_score
             }
 
-        # ===============================
-        # PHASE DETECTION
-        # ===============================
         detected_phase = PHASE_ORDER[0]
-
         for phase in PHASE_ORDER:
             if final.get(phase, {}).get("score", 0) >= 70:
                 detected_phase = phase
@@ -199,30 +125,22 @@ def run_pipeline(company, project_type):
         active_phases = PHASE_ORDER[:PHASE_ORDER.index(detected_phase) + 1]
 
         if active_phases:
-            overall_score = round(
-                sum(final[p]["score"] for p in active_phases) / len(active_phases),
-                2
-            )
+            overall_score = round(sum(final[p]["score"] for p in active_phases) / len(active_phases), 2)
         else:
             overall_score = 0
 
-        # ===============================
-        # RISK CLASSIFICATION
-        # ===============================
-        if overall_score >= 85:
-            risk = "🟢 Low Risk"
-        elif overall_score >= 70:
-            risk = "🟡 Moderate Risk"
-        elif overall_score >= 50:
-            risk = "🟠 High Risk"
-        else:
-            risk = "🔴 Critical Risk"
+        if overall_score >= 85: risk = "🟢 Low Risk"
+        elif overall_score >= 70: risk = "🟡 Moderate Risk"
+        elif overall_score >= 50: risk = "🟠 High Risk"
+        else: risk = "🔴 Critical Risk"
 
         executive_summary = (
             f"This project is currently assessed at the {detected_phase} phase "
             f"with an overall compliance score of {overall_score}%. "
             f"Risk level is classified as {risk}."
         )
+
+        if log_callback: log_callback("[SYSTEM] Pipeline execution finished successfully.")
 
         return {
             "overall_score": overall_score,
@@ -233,4 +151,5 @@ def run_pipeline(company, project_type):
         }
 
     finally:
+        if log_callback: log_callback("[SYSTEM] Shutting down Wolfgang session...")
         wolfgang.close()

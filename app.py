@@ -26,6 +26,9 @@ from drive_utils import (
     download_folder_recursively
 )
 
+# Import Logging
+from logger_utils import append_log
+
 # --- PAGE CONFIGURATION ---
 st.set_page_config(layout="wide", page_title="MINT Command Center", initial_sidebar_state="expanded")
 
@@ -39,6 +42,33 @@ if "audit_results" not in st.session_state:
     st.session_state.audit_results = None
 if "audit_company" not in st.session_state:
     st.session_state.audit_company = None
+
+# =====================================================
+# HIGH-CONTRAST "CONTROL ROOM" STYLING
+# =====================================================
+st.markdown("""
+<style>
+/* Sidebar styling */
+[data-testid="stSidebar"] {
+    background-color: #121212;
+    color: white;
+}
+/* Sections */
+.section-header {
+    border-bottom: 1px solid #333;
+    padding-bottom: 10px;
+    margin-top: 40px;
+    margin-bottom: 20px;
+    color: #F8F9FA;
+    font-weight: 300;
+}
+/* Override main background for true dark mode */
+.stApp {
+    background-color: #0E1117;
+    color: #C9D1D9;
+}
+</style>
+""", unsafe_allow_html=True)
 
 # =====================================================
 # HELPERS & BUG FIXES
@@ -74,38 +104,31 @@ class ExecutivePDF(FPDF):
         self.timestamp = datetime.datetime.now().strftime("%B %d, %Y - %H:%M")
 
     def header(self):
-        # Dark Header Banner
-        self.set_fill_color(15, 23, 42) # Slate 900
+        self.set_fill_color(15, 23, 42) 
         self.rect(0, 0, 210, 40, 'F')
         
-        # Inject Logo if it exists in the folder
         if os.path.exists("logo.png"):
             try:
                 self.image("logo.png", x=10, y=8, w=25)
             except:
-                pass # If logo is corrupted, skip it
+                pass 
 
-        # Header Text
         self.set_y(15)
         self.set_font("Arial", "B", 18)
-        self.set_text_color(248, 250, 252) # Slate 50
+        self.set_text_color(248, 250, 252) 
         self.cell(0, 10, "COMPLIANCE EXECUTIVE BRIEF", ln=True, align='C')
-        
-        # Reset position below header
         self.set_y(45)
 
     def footer(self):
-        # Bottom Footer
         self.set_y(-15)
         self.set_font("Arial", "I", 8)
-        self.set_text_color(148, 163, 184) # Slate 400
+        self.set_text_color(148, 163, 184) 
         self.cell(0, 10, f"Generated for {self.company} on {self.timestamp} | Page {self.page_no()}", align='C')
 
 def generate_pdf(company, results):
     pdf = ExecutivePDF(company)
     pdf.add_page()
     
-    # --- KEY METRICS ---
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 14)
     pdf.cell(100, 10, f"Target Entity: {pdf.company}", ln=False)
@@ -115,11 +138,10 @@ def generate_pdf(company, results):
     pdf.cell(100, 8, f"Detected Phase: {clean_text(results['detected_phase'])}", ln=False)
     pdf.cell(90, 8, f"Maturity: {maturity_level(results['overall_score'])}", ln=True, align='R')
     
-    # Color code risk
     if results['overall_score'] < 70:
-        pdf.set_text_color(220, 38, 38) # Red 600
+        pdf.set_text_color(220, 38, 38) 
     else:
-        pdf.set_text_color(22, 163, 74) # Green 600
+        pdf.set_text_color(22, 163, 74) 
     pdf.cell(190, 8, f"Risk Classification: {clean_text(results['risk_level'])}", ln=True, align='R')
     
     pdf.ln(8)
@@ -127,21 +149,19 @@ def generate_pdf(company, results):
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(8)
     
-    # --- EXECUTIVE SUMMARY ---
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 14)
     pdf.cell(0, 10, "Diagnostic Summary", ln=True)
     pdf.set_font("Arial", "", 11)
-    pdf.set_text_color(71, 85, 105) # Slate 500
+    pdf.set_text_color(71, 85, 105) 
     pdf.multi_cell(0, 6, clean_text(results["executive_summary"]))
     pdf.ln(10)
     
-    # --- PHASE BREAKDOWN TABLE ---
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 14)
     pdf.cell(0, 10, "Phase Performance", ln=True)
     
-    pdf.set_fill_color(241, 245, 249) # Slate 100
+    pdf.set_fill_color(241, 245, 249) 
     pdf.set_font("Arial", "B", 10)
     pdf.cell(140, 8, "Project Phase", border=1, fill=True)
     pdf.cell(50, 8, "Compliance Score", border=1, fill=True, ln=True, align='C')
@@ -154,13 +174,12 @@ def generate_pdf(company, results):
     
     pdf.ln(10)
 
-    # --- PRIORITY GAPS TABLE ---
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 14)
     pdf.cell(0, 10, "Priority Remediation Targets", ln=True)
     
-    pdf.set_fill_color(254, 226, 226) # Red 50 (Warning color)
-    pdf.set_text_color(153, 27, 27) # Red 800
+    pdf.set_fill_color(254, 226, 226) 
+    pdf.set_text_color(153, 27, 27) 
     pdf.set_font("Arial", "B", 10)
     pdf.cell(40, 8, "Phase", border=1, fill=True)
     pdf.cell(120, 8, "Document Requirement", border=1, fill=True)
@@ -202,13 +221,11 @@ with st.sidebar:
     target_zip_for_audit = None
     drive_ready = False
     
-    # LOCAL ZIP
     if data_source == "📁 Local ZIP Upload":
         uploaded_file = st.file_uploader("Upload Payload", type="zip")
         if uploaded_file:
             target_zip_for_audit = uploaded_file
             
-    # GOOGLE DRIVE
     elif data_source == "☁️ Google Drive":
         if "matching_folders" not in st.session_state: st.session_state.matching_folders = []
         if "has_searched" not in st.session_state: st.session_state.has_searched = False
@@ -261,7 +278,7 @@ with st.sidebar:
 
     st.divider()
     
-    # EXECUTION BUTTON
+    # --- EXECUTION WITH LIVE LOGGING ---
     if st.button("🚀 INITIATE AUDIT", type="primary", use_container_width=True):
         if not company:
             st.error("Provide a Target Company.")
@@ -270,19 +287,49 @@ with st.sidebar:
         elif data_source == "☁️ Google Drive" and not drive_ready and not os.path.exists(f"downloads/{company}"):
             st.error("Extract files from Drive first.")
         else:
-            with st.spinner("Intelligence Engine processing documents..."):
+            # Create a visual Status Box in Streamlit
+            with st.status("🚀 Initializing MINT Intelligence Engine...", expanded=True) as status_box:
+                
+                # UI Elements for Live Terminal & Progress
+                log_container = st.empty()
+                progress_bar = st.progress(0)
+                
+                log_history = []
+                
+                # Callback: Updates UI Terminal AND writes to physical local log file
+                def ui_logger(msg):
+                    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+                    formatted_msg = f"[{timestamp}] {msg}"
+                    log_history.append(formatted_msg)
+                    
+                    # Show in Streamlit UI (keep only last 15 lines to avoid massive scrolling)
+                    log_container.code("\n".join(log_history[-15:]), language="bash")
+                    
+                    # Save to permanent physical log file via logger_utils
+                    append_log(company, formatted_msg)
+                    
+                # Callback: Updates Progress Bar
+                def ui_progress(current, total):
+                    progress_bar.progress(current / total)
+
                 if target_zip_for_audit:
+                    ui_logger("[SYSTEM] Unzipping uploaded payload...")
                     extract_zip(target_zip_for_audit, company)
                     
-                results = run_pipeline(company, project_type)
+                # Run pipeline with callbacks injected!
+                results = run_pipeline(company, project_type, log_callback=ui_logger, progress_callback=ui_progress)
                 save_audit_history(company, results)
                 
-                st.session_state.audit_results = results
-                st.session_state.audit_company = company
+                # Close the status box neatly
+                status_box.update(label="✅ Audit Complete!", state="complete", expanded=False)
+                
+            st.session_state.audit_results = results
+            st.session_state.audit_company = company
+            st.rerun() # Refresh dashboard immediately
 
 
 # =====================================================
-# MAIN DASHBOARD AREA (REFINED UI)
+# MAIN DASHBOARD AREA
 # =====================================================
 
 if st.session_state.audit_results is None:

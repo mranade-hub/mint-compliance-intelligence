@@ -4,26 +4,15 @@ from compliance_matrix import COMPLIANCE_MATRIX
 
 
 def safe_json_extract(text):
-    """
-    Robust JSON extractor.
-    Handles:
-    - Markdown fences
-    - 'Retrieved XX sources' text
-    - Multiple JSON blocks
-    - Arrays or single objects
-    """
-
     if not text:
         return None
 
     import re
     import json
 
-    # Remove markdown fences
     text = re.sub(r"```json", "", text, flags=re.IGNORECASE)
     text = re.sub(r"```", "", text)
 
-    # ✅ Try extracting JSON array first
     array_matches = re.findall(r"\[[\s\S]*?\]", text)
     for match in array_matches:
         try:
@@ -33,7 +22,6 @@ def safe_json_extract(text):
         except:
             continue
 
-    # ✅ Try extracting JSON object
     object_matches = re.findall(r"\{[\s\S]*?\}", text)
     for match in object_matches:
         try:
@@ -72,7 +60,6 @@ Folder Structure:
     if isinstance(parsed, dict):
         return parsed
 
-    # fallback keyword detection
     fallback = {}
     lower_structure = structure_text.lower()
 
@@ -87,19 +74,28 @@ Folder Structure:
     return fallback
 
 
-def ai_deep_audit_batch(phase, file_paths, wolfgang):
+def ai_deep_audit_batch(phase, file_paths, wolfgang, log_callback=None, progress_callback=None):
 
     if not file_paths:
         return {}
 
     MAX_FILES = 5
     results = []
+    
+    # Calculate total batches for the progress bar
+    total_batches = (len(file_paths) + MAX_FILES - 1) // MAX_FILES
 
-    for i in range(0, len(file_paths), MAX_FILES):
+    for batch_idx, i in enumerate(range(0, len(file_paths), MAX_FILES)):
 
         batch = file_paths[i:i+MAX_FILES]
 
+        if log_callback:
+            log_callback(f"[WOLFGANG] Uploading Batch {batch_idx + 1}/{total_batches} ({len(batch)} files)...")
+
         wolfgang.upload_multiple(batch)
+
+        if log_callback:
+            log_callback(f"[WOLFGANG] Prompting AI to evaluate Batch {batch_idx + 1}...")
 
         prompt = f"""
 You are auditing MINT compliance documents.
@@ -129,5 +125,14 @@ Return ONLY JSON array:
 
         if isinstance(parsed, list):
             results.extend(parsed)
+            if log_callback:
+                log_callback(f"[SUCCESS] Batch {batch_idx + 1} analyzed. Extracted {len(parsed)} evaluations.")
+        else:
+            if log_callback:
+                log_callback(f"[ERROR] Batch {batch_idx + 1} failed JSON extraction. AI format unexpected.")
+
+        # Update the progress bar
+        if progress_callback:
+            progress_callback(batch_idx + 1, total_batches)
 
     return results
