@@ -1,3 +1,4 @@
+import os
 import re
 import json
 from compliance_matrix import COMPLIANCE_MATRIX
@@ -77,49 +78,43 @@ Folder Structure:
 def ai_deep_audit_batch(phase, file_paths, wolfgang, log_callback=None, progress_callback=None):
 
     if not file_paths:
-        return {}
+        return []
 
-    MAX_FILES = 5
+    MAX_FILES = 4 # Reduced from 5 to lessen LLM output truncation
     results = []
     
-    # Calculate total batches for the progress bar
     total_batches = (len(file_paths) + MAX_FILES - 1) // MAX_FILES
 
-    for batch_idx, i in enumerate(range(0, len(file_paths), MAX_FILES)):
-
-        batch = file_paths[i:i+MAX_FILES]
-
-        if log_callback:
-            log_callback(f"[WOLFGANG] Uploading Batch {batch_idx + 1}/{total_batches} ({len(batch)} files)...")
-
-        wolfgang.upload_multiple(batch)
-
-        if log_callback:
-            log_callback(f"[WOLFGANG] Prompting AI to evaluate Batch {batch_idx + 1}...")
-
-        prompt = f"""
+    prompt = """
 You are auditing MINT compliance documents.
-
 For EACH uploaded file:
-
-1. Identify which compliance document type it belongs to 
-   (must match EXACT name from compliance matrix).
+1. Identify which compliance document type it belongs to (must match EXACT name from compliance matrix).
 2. Evaluate quality fields.
-
-Return ONLY JSON array:
-
+Return ONLY a valid JSON array of objects. Do not truncate the output.
 [
-  {{
+  {
     "document_name": "...",
     "compliance_type": "...",
     "appears_filled": true/false,
     "contains_project_content": true/false,
     "appears_template_only": true/false,
     "document_type_correct": true/false
-  }}
+  }
 ]
 """
 
+    for batch_idx, i in enumerate(range(0, len(file_paths), MAX_FILES)):
+        batch = file_paths[i:i+MAX_FILES]
+
+        # WIPE MEMORY: Prevent context window from blowing up on large folders
+        if hasattr(wolfgang, 'clear_chat'):
+            wolfgang.clear_chat()
+
+        if log_callback:
+            log_callback(f"[WOLFGANG] Uploading Batch {batch_idx + 1}/{total_batches} ({len(batch)} files)...")
+
+        # --- ATTEMPT 1: FULL BATCH ---
+        wolfgang.upload_multiple(batch)
         response = wolfgang.send_prompt(prompt)
         parsed = safe_json_extract(response)
 
@@ -129,10 +124,33 @@ Return ONLY JSON array:
                 log_callback(f"[SUCCESS] Batch {batch_idx + 1} analyzed. Extracted {len(parsed)} evaluations.")
         else:
             if log_callback:
-                log_callback(f"[ERROR] Batch {batch_idx + 1} failed JSON extraction. AI format unexpected.")
+                log_callback(f"[WARNING] Batch {batch_idx + 1} failed JSON extraction. Files may be too large. Falling back to 1-by-1 processing...")
 
-        # Update the progress bar
+            # --- ATTEMPT 2: DYNAMIC FALLBACK (ONE BY ONE) ---
+            for file_path in batch:
+                if hasattr(wolfgang, 'clear_chat'):
+                    wolfgang.clear_chat() # Wipe memory for each large file
+                
+                filename = os.path.basename(file_path)
+                if log_callback:
+                    log_callback(f"[WOLFGANG] Uploading single file fallback: {filename}...")
+                
+                wolfgang.upload_multiple([file_path])
+                response_single = wolfgang.send_prompt(prompt)
+                parsed_single = safe_json_extract(response_single)
+                
+                # Single file might return a list [ {dict} ] or just a {dict}
+                if isinstance(parsed_single, list):
+                    results.extend(parsed_single)
+                    if log_callback: log_callback(f"[SUCCESS] Isolated file '{filename}' analyzed.")
+                elif isinstance(parsed_single, dict):
+                    results.append(parsed_single)
+                    if log_callback: log_callback(f"[SUCCESS] Isolated file '{filename}' analyzed.")
+                else:
+                    if log_callback: log_callback(f"[FATAL] Isolated file '{filename}' failed. Unreadable or corrupted. Skipping.")
+
+        # Update the UI progress bar after the batch completes (or completely fails)
         if progress_callback:
-            progress_callback(batch_idx + 1, total_batches)
+            progress_callback(batch_idx + 1, total_batches, f"Analyzing documents: Batch {batch_idx + 1} of {total_batches}")
 
     return results

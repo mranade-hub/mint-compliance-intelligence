@@ -14,6 +14,10 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
     structure_text = extract_structure(base)
 
     if log_callback: log_callback("[SYSTEM] Booting Wolfgang Client & authenticating session...")
+    
+    # Update progress bar before starting heavy lifting
+    if progress_callback: progress_callback(0, 1, "Initializing Wolfgang AI Connection...")
+    
     wolfgang = WolfgangClient()
 
     try:
@@ -43,6 +47,7 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
         )
 
         if log_callback: log_callback("[SYSTEM] Deep audit complete. Calculating final maturity scores...")
+        if progress_callback: progress_callback(1, 1, "Generating Executive Report...")
 
         from collections import defaultdict
         compliance_map = defaultdict(list)

@@ -204,7 +204,7 @@ def generate_pdf(company, results):
 # SIDEBAR: SETUP & INGESTION
 # =====================================================
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg", width=40)
+    st.image("logo.png", width=100)
     st.title("MINT Setup")
     
     company = st.text_input("Target Company")
@@ -278,7 +278,7 @@ with st.sidebar:
 
     st.divider()
     
-    # --- EXECUTION WITH LIVE LOGGING ---
+    # --- EXECUTION WITH CLEAN PROGRESS BAR ---
     if st.button("🚀 INITIATE AUDIT", type="primary", use_container_width=True):
         if not company:
             st.error("Provide a Target Company.")
@@ -287,49 +287,40 @@ with st.sidebar:
         elif data_source == "☁️ Google Drive" and not drive_ready and not os.path.exists(f"downloads/{company}"):
             st.error("Extract files from Drive first.")
         else:
-            # Create a visual Status Box in Streamlit
-            with st.status("🚀 Initializing MINT Intelligence Engine...", expanded=True) as status_box:
+            with st.status("🚀 Intelligence Engine Active...", expanded=True) as status_box:
                 
-                # UI Elements for Live Terminal & Progress
-                log_container = st.empty()
-                progress_bar = st.progress(0)
+                # Setup clean progress UI
+                progress_bar = st.progress(0, text="Initializing...")
                 
-                log_history = []
-                
-                # Callback: Updates UI Terminal AND writes to physical local log file
-                def ui_logger(msg):
+                # Callback: Write securely to local file (NO UI logs)
+                def file_logger(msg):
                     timestamp = datetime.datetime.now().strftime("%H:%M:%S")
                     formatted_msg = f"[{timestamp}] {msg}"
-                    log_history.append(formatted_msg)
-                    
-                    # Show in Streamlit UI (keep only last 15 lines to avoid massive scrolling)
-                    log_container.code("\n".join(log_history[-15:]), language="bash")
-                    
-                    # Save to permanent physical log file via logger_utils
                     append_log(company, formatted_msg)
                     
-                # Callback: Updates Progress Bar
-                def ui_progress(current, total):
-                    progress_bar.progress(current / total)
+                # Callback: Updates the clean progress bar
+                def ui_progress(current, total, message="Processing"):
+                    progress = current / total if total > 0 else 0
+                    percent = int(progress * 100)
+                    progress_bar.progress(progress, text=f"**{message}** ({percent}%)")
 
                 if target_zip_for_audit:
-                    ui_logger("[SYSTEM] Unzipping uploaded payload...")
+                    file_logger("[SYSTEM] Unzipping uploaded payload...")
                     extract_zip(target_zip_for_audit, company)
                     
-                # Run pipeline with callbacks injected!
-                results = run_pipeline(company, project_type, log_callback=ui_logger, progress_callback=ui_progress)
+                # Execute pipeline using callbacks
+                results = run_pipeline(company, project_type, log_callback=file_logger, progress_callback=ui_progress)
                 save_audit_history(company, results)
                 
-                # Close the status box neatly
                 status_box.update(label="✅ Audit Complete!", state="complete", expanded=False)
                 
             st.session_state.audit_results = results
             st.session_state.audit_company = company
-            st.rerun() # Refresh dashboard immediately
+            st.rerun() 
 
 
 # =====================================================
-# MAIN DASHBOARD AREA
+# MAIN DASHBOARD AREA (REFINED UI)
 # =====================================================
 
 if st.session_state.audit_results is None:
