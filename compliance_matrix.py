@@ -1,54 +1,38 @@
 # compliance_matrix.py
 
-# Maps phases to documents, and lists which Project Types require them.
+# Maps phases to documents, and lists which Project Types require (R) or conditionally require (C) them.
 COMPLIANCE_MATRIX = {
-    "Manage": {
-        "Project Status Report": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "Communication Plan": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "Hand off Document Sales to Services": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "Services SOW": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"]
-    },
     "Engage": {
-        "Project Plan": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "Project kick off Presentation": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"]
+        "Sales - Project Blue Print / Hand Off Document - Sales to Sales": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "Services - SOW": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "Pre-Kick Off Deck": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "Kickoff Deck": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "Kickoff Meeting Notes": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "RACI Document": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"}
     },
     "Design": {
-        "Solution Design Document": ["New Project", "Transitioned Project", "Subcontracted Project"],
-        "Solution Design sign off email": ["New Project", "Transitioned Project", "Subcontracted Project"],
-        "Requirements Traceability Matrix": ["New Project", "Transitioned Project", "Subcontracted Project"],
-        "Integration Specification Document": ["New Project", "Transitioned Project"],
-        "Integration Specification sign off email": ["New Project", "Transitioned Project"],
-        "Migration Specification Document": ["New Project", "Transitioned Project"],
-        "Migration Specification sign off email": ["New Project", "Transitioned Project"],
-        "Validation Plan": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"]
+        "Design Doc fully executed": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "C"},
+        "Project Plan": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "IRD": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "C", "Reseller Project": "C"},
+        "Template Transaction Gap Analysis (Optional)": {"New Project": "C", "Transitioned Project": "C", "SubContracted Project": "C", "Reseller Project": "C"}
     },
     "Build": {
-        "Build Specification": ["New Project", "Transitioned Project", "Subcontracted Project"],
-        "System Test Plan": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "Test Scripts": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "Test Results": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "System Test Summary Report": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "Deployment Plan": ["New Project", "Transitioned Project", "Subcontracted Project"],
-        "Solution hand off Demo sign off email": ["New Project", "Transitioned Project", "Subcontracted Project"]
+        "Action Log": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "Project Status Report": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "Communication Plan (Engage), Action Log (Execute) or the newer Consolidated version (Execute)": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"}
     },
     "Partner OnBoarding": {
-        "Onboarding Kickoff Presentation": ["New Project", "Transitioned Project"],
-        "Partner Information collection": ["New Project", "Transitioned Project"],
-        "Welcome Pack to Partners": ["New Project", "Transitioned Project"],
-        "Partner Go-Live Email": ["New Project", "Transitioned Project"]
+        "On Boarding Kick Off Deck": {"Reseller Project": "R"},
+        "On Boarding Process": {"Reseller Project": "R"},
+        "Partner Onboarding Status": {"Reseller Project": "R"}
     },
-    "Validation": {
-        "Validation Summary Report": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "UAT Test Plan": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "UAT Test Scripts": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "UAT Test Results": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "UAT Sign Off Email": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "Traceability Matrix validation": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "Configuration specification": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"]
+    "Execute": {
+        "UAT Execution Tracker": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "MINT Configuration Template": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "Integration Completion Certification": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "C", "Reseller Project": "C"}
     },
-    "Closure": {
-        "Go Live Cutover Plan": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "Go Live / Deployment Email to Customer": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"],
-        "Project Closure Report / Post Go Live Check List": ["New Project", "Transitioned Project", "Subcontracted Project", "Reseller Project"]
+    "Test": {
+        "Internal Transition Document": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "MINT Project Completion Form": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"}
     }
 }

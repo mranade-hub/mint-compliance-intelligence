@@ -63,13 +63,19 @@ def load_company_history(company):
                 history.append(data)
     return sorted(history, key=lambda x: x["timestamp"], reverse=True)
 
-def top_gaps(results):
-    gaps = []
+# --- NEW LOCATION MISMATCH FUNCTION ---
+def get_location_mismatches(results):
+    mismatches = []
     for phase, info in results["phases"].items():
         for d in info["documents"]:
-            if not d["pass"] or d.get("wrong_folder"): 
-                gaps.append((phase, d["document"], d["score"], d.get("wrong_folder", False), d.get("actual_folder", "N/A")))
-    return sorted(gaps, key=lambda x: x[2])[:5]
+            if d.get("wrong_folder"):
+                actual = d.get("actual_folder", "Unknown")
+                mismatches.append({
+                    "document": d["document"],
+                    "expected": phase,
+                    "actual": actual
+                })
+    return mismatches
 
 class ExecutivePDF(FPDF):
     def __init__(self, company):
@@ -141,27 +147,30 @@ def generate_pdf(company, results):
     
     pdf.ln(10)
 
+    # --- NEW PDF SECTION: FILE LOCATION MISMATCHES ---
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Priority Remediation Targets", ln=True)
+    pdf.cell(0, 10, "File Location Tracker", ln=True)
     
-    pdf.set_fill_color(254, 226, 226) 
-    pdf.set_text_color(153, 27, 27) 
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(40, 8, "Phase", border=1, fill=True)
-    pdf.cell(120, 8, "Document Requirement", border=1, fill=True)
-    pdf.cell(30, 8, "Score", border=1, fill=True, ln=True, align='C')
-    
-    pdf.set_font("Arial", "", 10)
-    pdf.set_text_color(71, 85, 105)
-    gaps = top_gaps(results)
-    if not gaps:
-        pdf.cell(190, 8, "No critical gaps identified.", border=1, ln=True, align='C')
+    mismatches = get_location_mismatches(results)
+    if not mismatches:
+        pdf.set_font("Arial", "", 11)
+        pdf.set_text_color(22, 163, 74) # Green color for success
+        pdf.cell(0, 8, "All identified documents are perfectly placed in their designated phase folders.", ln=True)
     else:
-        for g in gaps:
-            pdf.cell(40, 8, clean_text(g[0])[:25], border=1)
-            pdf.cell(120, 8, clean_text(g[1])[:60], border=1) 
-            pdf.cell(30, 8, f"{g[2]}%", border=1, ln=True, align='C')
+        pdf.set_fill_color(254, 226, 226) 
+        pdf.set_text_color(153, 27, 27) 
+        pdf.set_font("Arial", "B", 10)
+        pdf.cell(70, 8, "Document", border=1, fill=True)
+        pdf.cell(60, 8, "Expected Phase", border=1, fill=True)
+        pdf.cell(60, 8, "Actual Location", border=1, fill=True, ln=True, align='C')
+        
+        pdf.set_font("Arial", "", 10)
+        pdf.set_text_color(71, 85, 105)
+        for m in mismatches:
+            pdf.cell(70, 8, clean_text(m["document"])[:35], border=1)
+            pdf.cell(60, 8, clean_text(m["expected"])[:30], border=1)
+            pdf.cell(60, 8, clean_text(m["actual"])[:30], border=1, ln=True, align='C')
 
     file_path = f"{clean_text(company)}_Compliance_Report.pdf"
     pdf.output(file_path)
@@ -169,7 +178,7 @@ def generate_pdf(company, results):
 
 
 with st.sidebar:
-    st.image("logo.png", width=140)
+    st.image("https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg", width=40)
     st.title("MINT Setup")
     
     company = st.text_input("Target Company")
@@ -309,25 +318,20 @@ else:
             radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), margin=dict(l=40, r=40, t=20, b=20), height=320)
             st.plotly_chart(radar, use_container_width=True)
 
+    # --- NEW UI SECTION: FILE LOCATION TRACKER ---
     with col_right:
         with st.container(border=True):
-            st.subheader("Priority Remediation Targets")
-            gaps = top_gaps(results)
-            if not gaps:
-                st.success("Operational integrity verified. No critical gaps found. 🎉")
+            st.subheader("File Location Tracker")
+            mismatches = get_location_mismatches(results)
+            
+            if not mismatches:
+                st.success("All identified documents are perfectly placed in their correct folders! 📁✅")
             else:
-                for phase, doc, score, wrong_folder, actual_folder in gaps:
-                    icon = "📁" if wrong_folder else "⚠️"
-                    with st.expander(f"{icon} {doc} (Score: {score}%)"):
-                        st.write(f"**Target Phase:** {phase}")
-                        if wrong_folder:
-                            st.error(f"Found in wrong location: `{actual_folder}`")
-                        ai_comment = "No specific diagnostic."
-                        for d in results["phases"][phase]["documents"]:
-                            if d["document"] == doc:
-                                ai_comment = d.get("comment", ai_comment)
-                                break
-                        st.caption(f"**AI Notes:** {ai_comment}")
+                st.error(f"Found {len(mismatches)} misplaced documents.")
+                for m in mismatches:
+                    with st.expander(f"🚫 {m['document']}"):
+                        st.write(f"**Should be in:** `{m['expected']}`")
+                        st.write(f"**Actually found in:** `{m['actual']}`")
 
     with st.container(border=True):
         st.subheader("Compliance Master Ledger")
