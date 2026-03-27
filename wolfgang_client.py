@@ -10,16 +10,6 @@ BASE_DIR = os.path.dirname(__file__)
 SESSION_FILE = os.path.join(BASE_DIR, "session.json")
 
 
-def extract_json(text: str) -> str:
-    import re
-    text = re.sub(r"```json", "", text)
-    text = re.sub(r"```", "", text)
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        return match.group(0)
-    return text.strip() 
-
-
 class WolfgangClient:
 
     def __init__(self):
@@ -58,26 +48,60 @@ class WolfgangClient:
             return browser, context, page
 
     def clear_chat(self):
-        """Wipes the AI context clean by refreshing the browser page."""
+        """Forces a completely new chat session to wipe the token memory clean."""
         try:
-            self.page.reload()
-            self.page.wait_for_selector(CHAT_INPUT_SELECTOR, timeout=30000)
+            # Navigating to the root URL forces a fresh session ID in most LLM UIs
+            self.page.goto(BASE_URL, wait_until="domcontentloaded")
+            self.page.wait_for_selector(CHAT_INPUT_SELECTOR, state="visible", timeout=60000)
+            self.page.wait_for_timeout(3000) 
         except Exception as e:
             print(f"Failed to clear chat: {e}")
+
+    def _force_ui_upload_menu(self):
+        self.page.evaluate("""() => {
+            const btn = document.querySelector("#input-menu-button");
+            if(btn) btn.click();
+        }""")
+        self.page.wait_for_timeout(1000)
+        self.page.evaluate("""() => {
+            const items = Array.from(document.querySelectorAll('[data-melt-dropdown-menu-item]'));
+            const upload = items.find(el => el.textContent.includes('Upload Files'));
+            if(upload) upload.click();
+        }""")
+        self.page.wait_for_timeout(1000)
 
     def upload_file(self, file_path):
         page = self.page
         print("📎 Uploading:", file_path)
-        page.locator("#input-menu-button").click()
-        page.wait_for_timeout(500)
-        page.locator('[data-melt-dropdown-menu-item]', has_text="Upload Files").click(force=True)
-        page.wait_for_selector("input[type=file]", state="attached")
-        page.locator("input[type=file]").first.set_input_files(file_path)
-        page.wait_for_timeout(4000)
+        page.wait_for_selector(CHAT_INPUT_SELECTOR, state="visible", timeout=60000)
+        page.wait_for_timeout(2000)
+
+        try:
+            page.locator("input[type=file]").first.set_input_files(file_path, timeout=3000)
+        except:
+            self._force_ui_upload_menu()
+            page.locator("input[type=file]").first.set_input_files(file_path)
+
+        page.wait_for_timeout(5000)
         print("✅ Upload complete")
+
+    def upload_multiple(self, file_paths):
+        page = self.page
+        page.wait_for_selector(CHAT_INPUT_SELECTOR, state="visible", timeout=60000)
+        page.wait_for_timeout(2000) 
+
+        try:
+            page.locator("input[type=file]").first.set_input_files(file_paths, timeout=3000)
+        except:
+            self._force_ui_upload_menu()
+            page.locator("input[type=file]").first.set_input_files(file_paths)
+        
+        page.wait_for_timeout(15000)
 
     def send_prompt(self, prompt: str) -> str:
         page = self.page
+        page.wait_for_selector(CHAT_INPUT_SELECTOR, state="visible", timeout=120000)
+        
         page.evaluate(
             """(text) => {
                 const editor = document.querySelector("#chat-input");
@@ -86,12 +110,21 @@ class WolfgangClient:
             }""",
             prompt
         )
+        
+        page.wait_for_timeout(1000)
         page.keyboard.press("Enter")
-        page.wait_for_selector("div.chat-assistant", timeout=180000)
+        
+        # Give the AI time to actually start generating before we begin checking for stability
+        # This prevents premature overlaps if an error flashes on screen
+        page.wait_for_timeout(5000)
+        
+        page.wait_for_selector("div.chat-assistant", timeout=300000)
 
         last_text = ""
         stable_count = 0
-        while stable_count < 3:
+        
+        # Increased stability requirement to 4 checks (8 seconds of no text changing) to ensure it is 100% finished
+        while stable_count < 4:
             page.wait_for_timeout(2000)
             blocks = page.locator("div.chat-assistant")
             current = blocks.nth(blocks.count() - 1).inner_text()
@@ -100,17 +133,8 @@ class WolfgangClient:
             else:
                 stable_count = 0
                 last_text = current
+                
         return last_text.strip()
-    
-    def upload_multiple(self, file_paths):
-        page = self.page
-        page.wait_for_selector("#chat-input", timeout=30000)
-        page.click("#input-menu-button")
-        page.wait_for_timeout(500)
-        page.locator('[data-melt-dropdown-menu-item]', has_text="Upload Files").click(force=True)
-        file_input = page.locator("input[type=file]").first
-        file_input.set_input_files(file_paths)
-        page.wait_for_timeout(5000)
 
     def close(self):
         self.browser.close()
