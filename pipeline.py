@@ -7,7 +7,6 @@ from compliance_matrix import COMPLIANCE_MATRIX
 
 PHASE_ORDER = list(COMPLIANCE_MATRIX.keys())
 
-# --- CRITICAL FIX 2: Fuzzy String Matching ---
 def normalize_str(s):
     """Strips all spaces and punctuation to guarantee exact dictionary mapping."""
     if not s: return ""
@@ -41,7 +40,6 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
         from collections import defaultdict
         compliance_map = defaultdict(list)
         
-        # Map AI results using the normalized string
         if isinstance(ai_results, list):
             for item in ai_results:
                 c_type = item.get("compliance_type")
@@ -58,7 +56,6 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
                 if project_type not in allowed_types:
                     continue
 
-                # Lookup using the normalized string to prevent 0% misses
                 qualities = compliance_map.get(normalize_str(doc), [])
 
                 if not qualities:
@@ -86,9 +83,16 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
                 actual_folder = "N/A"
                 
                 if file_path:
+                    # Parse the folder it actually sits in
                     actual_folder = os.path.basename(os.path.dirname(file_path))
+                    
+                    # If it's sitting naked in the root downloads/Company folder
+                    if actual_folder.lower() == company.lower():
+                        actual_folder = "Root Directory"
+                        
                     phase_keyword = phase.split()[0].lower() 
                     
+                    # Ensure it has the phase keyword somewhere in the path
                     if phase_keyword not in file_path.lower():
                         wrong_folder = True
                         best_score -= 10 

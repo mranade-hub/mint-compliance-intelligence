@@ -5,151 +5,147 @@ from compliance_matrix import COMPLIANCE_MATRIX
 
 
 def safe_json_extract(text):
-    if not text:
-        return None
-
-    import re
-    import json
-
-    text = re.sub(r"```json", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"```", "", text)
-
-    array_matches = re.findall(r"\[[\s\S]*?\]", text)
-    for match in array_matches:
+    if not text: return None
+    
+    array_match = re.search(r"\[.*\]", text, re.DOTALL)
+    if array_match:
         try:
-            parsed = json.loads(match)
-            if isinstance(parsed, list):
-                return parsed
-        except:
-            continue
-
-    object_matches = re.findall(r"\{[\s\S]*?\}", text)
-    for match in object_matches:
+            parsed = json.loads(array_match.group(0))
+            if isinstance(parsed, list): return parsed
+        except: pass
+        
+    object_match = re.search(r"\{.*\}", text, re.DOTALL)
+    if object_match:
         try:
-            parsed = json.loads(match)
-            if isinstance(parsed, dict):
-                return parsed
-        except:
-            continue
-
+            parsed = json.loads(object_match.group(0))
+            if isinstance(parsed, dict): return parsed
+        except: pass
+        
     return None
 
+def map_full_paths(parsed_data, original_batch):
+    """Reattaches the exact system folder paths to the AI's output."""
+    if not isinstance(parsed_data, list):
+        parsed_data = [parsed_data] if isinstance(parsed_data, dict) else []
+        
+    for item in parsed_data:
+        returned_path = str(item.get("file_path", ""))
+        doc_name = str(item.get("document_name", ""))
+        
+        best_match = original_batch[0] if len(original_batch) == 1 else ""
+        
+        if not best_match:
+            for full_path in original_batch:
+                if returned_path and returned_path.lower() in full_path.lower():
+                    best_match = full_path
+                    break
+                if doc_name and doc_name.lower() in full_path.lower():
+                    best_match = full_path
+                    break
 
-def ai_structure_validation(structure_text, project_type, wolfgang):
-
-    expected_format = {
-        phase: {doc: "FOUND/MISSING" for doc in docs}
-        for phase, docs in COMPLIANCE_MATRIX.items()
-    }
-
-    prompt = f"""
-Return ONLY valid JSON.
-No explanation.
-No markdown.
-No code fences.
-
-Format EXACTLY like this:
-{json.dumps(expected_format, indent=2)}
-
-Folder Structure:
-{structure_text}
-"""
-
-    response = wolfgang.send_prompt(prompt)
-    parsed = safe_json_extract(response)
-
-    if isinstance(parsed, dict):
-        return parsed
-
-    fallback = {}
-    lower_structure = structure_text.lower()
-
-    for phase, docs in COMPLIANCE_MATRIX.items():
-        fallback[phase] = {}
-        for doc in docs:
-            keyword = doc.split()[0].lower()
-            fallback[phase][doc] = (
-                "FOUND" if keyword in lower_structure else "MISSING"
-            )
-
-    return fallback
-
+        if best_match:
+            item["file_path"] = best_match
+            
+    return parsed_data
 
 def ai_deep_audit_batch(phase, file_paths, wolfgang, log_callback=None, progress_callback=None):
+    if not file_paths: return []
 
-    if not file_paths:
-        return []
-
-    MAX_FILES = 4 # Reduced from 5 to lessen LLM output truncation
-    results = []
+    VALID_DOCS = []
+    for p, docs in COMPLIANCE_MATRIX.items():
+        for doc_name in docs.keys():
+            VALID_DOCS.append(doc_name)
     
+    valid_docs_formatted = "\n".join(f"- {d}" for d in VALID_DOCS)
+
+    MAX_FILES = 4 
+    results = []
     total_batches = (len(file_paths) + MAX_FILES - 1) // MAX_FILES
 
-    prompt = """
-You are auditing MINT compliance documents.
+    if hasattr(wolfgang, 'clear_chat'): 
+        wolfgang.clear_chat()
+
+    for batch_idx, i in enumerate(range(0, len(file_paths), MAX_FILES)):
+        batch = file_paths[i:i+MAX_FILES]
+        batch_filenames = [os.path.basename(f) for f in batch]
+
+        prompt = f"""
+CRITICAL INSTRUCTION: Ignore all previous files and chat history. ONLY analyze the exact {len(batch)} NEW files just uploaded: 
+{batch_filenames}
+
+You MUST classify each file into ONE of the following exact 'compliance_type' categories. If it does not fit any, use "Unknown". Do not invent categories.
+
+Valid Categories:
+{valid_docs_formatted}
+- Unknown
+
 For EACH uploaded file:
-1. Identify which compliance document type it belongs to (must match EXACT name from compliance matrix).
+1. Identify which valid compliance category it belongs to.
 2. Evaluate quality fields.
-Return ONLY a valid JSON array of objects. Do not truncate the output.
+3. Return the EXACT "file_path" or file name from the list above.
+
+Return ONLY plain text JSON array. DO NOT use markdown.
 [
-  {
+  {{
+    "file_path": "...",
     "document_name": "...",
     "compliance_type": "...",
     "appears_filled": true/false,
     "contains_project_content": true/false,
     "appears_template_only": true/false,
     "document_type_correct": true/false
-  }
+  }}
 ]
 """
+        
+        if log_callback: log_callback(f"[WOLFGANG] Uploading Batch {batch_idx + 1}/{total_batches} ({len(batch)} files)...")
 
-    for batch_idx, i in enumerate(range(0, len(file_paths), MAX_FILES)):
-        batch = file_paths[i:i+MAX_FILES]
-
-        # WIPE MEMORY: Prevent context window from blowing up on large folders
-        if hasattr(wolfgang, 'clear_chat'):
-            wolfgang.clear_chat()
-
-        if log_callback:
-            log_callback(f"[WOLFGANG] Uploading Batch {batch_idx + 1}/{total_batches} ({len(batch)} files)...")
-
-        # --- ATTEMPT 1: FULL BATCH ---
         wolfgang.upload_multiple(batch)
         response = wolfgang.send_prompt(prompt)
         parsed = safe_json_extract(response)
 
         if isinstance(parsed, list):
+            # MAP THE FULL FOLDER PATHS BACK IN!
+            parsed = map_full_paths(parsed, batch)
             results.extend(parsed)
-            if log_callback:
-                log_callback(f"[SUCCESS] Batch {batch_idx + 1} analyzed. Extracted {len(parsed)} evaluations.")
+            if log_callback: log_callback(f"[SUCCESS] Batch {batch_idx + 1} analyzed.")
         else:
-            if log_callback:
-                log_callback(f"[WARNING] Batch {batch_idx + 1} failed JSON extraction. Files may be too large. Falling back to 1-by-1 processing...")
+            if log_callback: log_callback(f"[WARNING] Batch {batch_idx + 1} failed. Spawning new chat & retrying...")
+            
+            if hasattr(wolfgang, 'clear_chat'): 
+                wolfgang.clear_chat() 
+            
+            wolfgang.upload_multiple(batch)
+            response_retry = wolfgang.send_prompt(prompt)
+            parsed_retry = safe_json_extract(response_retry)
+            
+            if isinstance(parsed_retry, list):
+                parsed_retry = map_full_paths(parsed_retry, batch)
+                results.extend(parsed_retry)
+                if log_callback: log_callback(f"[SUCCESS] Batch {batch_idx + 1} analyzed after resetting chat memory.")
+            else:
+                if log_callback: log_callback(f"[WARNING] Batch {batch_idx + 1} failed again. Falling back to 1-by-1...")
+                
+                if hasattr(wolfgang, 'clear_chat'): 
+                    wolfgang.clear_chat()
 
-            # --- ATTEMPT 2: DYNAMIC FALLBACK (ONE BY ONE) ---
-            for file_path in batch:
-                if hasattr(wolfgang, 'clear_chat'):
-                    wolfgang.clear_chat() # Wipe memory for each large file
-                
-                filename = os.path.basename(file_path)
-                if log_callback:
-                    log_callback(f"[WOLFGANG] Uploading single file fallback: {filename}...")
-                
-                wolfgang.upload_multiple([file_path])
-                response_single = wolfgang.send_prompt(prompt)
-                parsed_single = safe_json_extract(response_single)
-                
-                # Single file might return a list [ {dict} ] or just a {dict}
-                if isinstance(parsed_single, list):
-                    results.extend(parsed_single)
-                    if log_callback: log_callback(f"[SUCCESS] Isolated file '{filename}' analyzed.")
-                elif isinstance(parsed_single, dict):
-                    results.append(parsed_single)
-                    if log_callback: log_callback(f"[SUCCESS] Isolated file '{filename}' analyzed.")
-                else:
-                    if log_callback: log_callback(f"[FATAL] Isolated file '{filename}' failed. Unreadable or corrupted. Skipping.")
+                for file_path in batch:
+                    filename = os.path.basename(file_path)
+                    if log_callback: log_callback(f"[WOLFGANG] Uploading single file fallback: {filename}...")
+                    
+                    wolfgang.upload_multiple([file_path])
+                    single_prompt = prompt.replace(str(batch_filenames), f"['{filename}']")
+                    parsed_single = safe_json_extract(wolfgang.send_prompt(single_prompt))
+                    
+                    parsed_single = map_full_paths(parsed_single, [file_path])
+                    
+                    if isinstance(parsed_single, list):
+                        results.extend(parsed_single)
+                    elif isinstance(parsed_single, dict):
+                        results.append(parsed_single)
+                    else:
+                        if log_callback: log_callback(f"[ERROR] Single file {filename} failed. Skipping.")
 
-        # Update the UI progress bar after the batch completes (or completely fails)
         if progress_callback:
             progress_callback(batch_idx + 1, total_batches, f"Analyzing documents: Batch {batch_idx + 1} of {total_batches}")
 
