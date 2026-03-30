@@ -19,15 +19,14 @@ COMPLIANCE_MATRIX = {
     "Build": {
         "Action Log": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
         "Project Status Report": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
-        "Communication Plan (Engage), Action Log (Execute) or the newer Consolidated version (Execute)": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"}
-    },
-    "Partner OnBoarding": {
+        "Action Log and Comm Plan": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
         "On Boarding Kick Off Deck": {"Reseller Project": "R"},
         "On Boarding Process": {"Reseller Project": "R"},
-        "Partner Onboarding Status": {"Reseller Project": "R"}
+        "Partner Tracker": {"Reseller Project": "R"}
     },
     "Execute": {
         "UAT Execution Tracker": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "Production Readiness Document": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
         "MINT Configuration Template": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
         "Integration Completion Certification": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "C", "Reseller Project": "C"}
     },
