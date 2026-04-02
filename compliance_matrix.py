@@ -5,19 +5,17 @@ COMPLIANCE_MATRIX = {
     "Engage": {
         "Sales - Project Blue Print / Hand Off Document - Sales to Sales": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
         "Services - SOW": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
-        "Pre-Kick Off Deck": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
-        "Kickoff Deck": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "Pre-Kick Off Deck / Kick Off Deck": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
         "Kickoff Meeting Notes": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
         "RACI Document": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"}
     },
     "Design": {
         "Design Doc fully executed": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "C"},
-        "Project Plan": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
+        "Project Plan (Potentially has RACI in it)": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
         "IRD": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "C", "Reseller Project": "C"},
         "Template Transaction Gap Analysis (Optional)": {"New Project": "C", "Transitioned Project": "C", "SubContracted Project": "C", "Reseller Project": "C"}
     },
     "Build": {
-        "Action Log": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
         "Project Status Report": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
         "Action Log and Comm Plan": {"New Project": "R", "Transitioned Project": "R", "SubContracted Project": "R", "Reseller Project": "R"},
         "On Boarding Kick Off Deck": {"Reseller Project": "R"},

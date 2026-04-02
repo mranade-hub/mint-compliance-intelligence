@@ -93,7 +93,8 @@ Return ONLY plain text JSON array. DO NOT use markdown.
     "appears_filled": true/false,
     "contains_project_content": true/false,
     "appears_template_only": true/false,
-    "document_type_correct": true/false
+    "document_type_correct": true/false,
+    "short_summary": "Provide a 1-sentence concise reason explaining document quality, missing data, or why it passed/failed."
   }}
 ]
 """
@@ -105,7 +106,6 @@ Return ONLY plain text JSON array. DO NOT use markdown.
         parsed = safe_json_extract(response)
 
         if isinstance(parsed, list):
-            # MAP THE FULL FOLDER PATHS BACK IN!
             parsed = map_full_paths(parsed, batch)
             results.extend(parsed)
             if log_callback: log_callback(f"[SUCCESS] Batch {batch_idx + 1} analyzed.")

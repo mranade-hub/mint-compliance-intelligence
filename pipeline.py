@@ -8,7 +8,6 @@ from compliance_matrix import COMPLIANCE_MATRIX
 PHASE_ORDER = list(COMPLIANCE_MATRIX.keys())
 
 def normalize_str(s):
-    """Strips all spaces and punctuation to guarantee exact dictionary mapping."""
     if not s: return ""
     return re.sub(r'[^a-z0-9]', '', str(s).lower())
 
@@ -62,7 +61,7 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
                     phase_results.append({
                         "document": doc, "quality": {}, "score": 0, "pass": False,
                         "wrong_folder": False, "actual_folder": "N/A", "expected_phase": phase,
-                        "comment": "No document submitted for this compliance requirement."
+                        "comment": "Missing: No document submitted for this requirement."
                     })
                     continue
 
@@ -83,25 +82,21 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
                 actual_folder = "N/A"
                 
                 if file_path:
-                    # Parse the folder it actually sits in
                     actual_folder = os.path.basename(os.path.dirname(file_path))
-                    
-                    # If it's sitting naked in the root downloads/Company folder
                     if actual_folder.lower() == company.lower():
                         actual_folder = "Root Directory"
                         
                     phase_keyword = phase.split()[0].lower() 
-                    
-                    # Ensure it has the phase keyword somewhere in the path
                     if phase_keyword not in file_path.lower():
                         wrong_folder = True
                         best_score -= 10 
 
-                comment = best_quality.get("comment", "")
+                comment = best_quality.get("short_summary", "")
+                
                 if wrong_folder:
-                    comment = f"⚠️ FOLDER MISMATCH: Required in '{phase}', but found in '{actual_folder}'. " + comment
+                    comment = f"⚠️ Wrong Folder ({actual_folder}). " + comment
                 elif not comment:
-                    comment = "Document appears complete and compliant." if best_score >= 70 else "Document incomplete or template-based."
+                    comment = "Complete and compliant." if best_score >= 70 else "Incomplete or template-based."
 
                 phase_results.append({
                     "document": doc, "quality": best_quality, "score": max(0, best_score),

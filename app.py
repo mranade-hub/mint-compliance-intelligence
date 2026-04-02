@@ -63,20 +63,15 @@ def load_company_history(company):
                 history.append(data)
     return sorted(history, key=lambda x: x["timestamp"], reverse=True)
 
-# --- NEW LOCATION MISMATCH FUNCTION ---
-def get_location_mismatches(results):
-    mismatches = []
+def top_gaps(results):
+    gaps = []
     for phase, info in results["phases"].items():
         for d in info["documents"]:
-            if d.get("wrong_folder"):
-                actual = d.get("actual_folder", "Unknown")
-                mismatches.append({
-                    "document": d["document"],
-                    "expected": phase,
-                    "actual": actual
-                })
-    return mismatches
+            if not d["pass"] or d.get("wrong_folder"): 
+                gaps.append((phase, d["document"], d["score"], d.get("wrong_folder", False), d.get("actual_folder", "N/A")))
+    return sorted(gaps, key=lambda x: x[2])[:5]
 
+# --- PDF GENERATION WITH MULTI-CELL WRAPPING ---
 class ExecutivePDF(FPDF):
     def __init__(self, company):
         super().__init__()
@@ -100,6 +95,32 @@ class ExecutivePDF(FPDF):
         self.set_font("Arial", "I", 8)
         self.set_text_color(148, 163, 184) 
         self.cell(0, 10, f"Generated for {self.company} on {self.timestamp} | Page {self.page_no()}", align='C')
+
+def draw_table_row(pdf, data, widths, line_height=6):
+    max_lines = 1
+    for i, text in enumerate(data):
+        text = clean_text(str(text))
+        eff_width = widths[i] - 2 
+        string_width = pdf.get_string_width(text)
+        lines = int(string_width / eff_width) + 1
+        lines = max(lines, len(text.split('\n')))
+        if lines > max_lines: max_lines = lines
+        
+    row_height = max_lines * line_height
+    
+    if pdf.get_y() + row_height > 270:
+        pdf.add_page()
+        
+    x_start = pdf.get_x()
+    y_start = pdf.get_y()
+    
+    for i, text in enumerate(data):
+        text = clean_text(str(text))
+        pdf.set_xy(x_start, y_start)
+        pdf.multi_cell(widths[i], line_height, text, border=1, align='L')
+        x_start += widths[i]
+        
+    pdf.set_xy(10, y_start + row_height)
 
 def generate_pdf(company, results):
     pdf = ExecutivePDF(company)
@@ -125,55 +146,43 @@ def generate_pdf(company, results):
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 14)
     pdf.cell(0, 10, "Diagnostic Summary", ln=True)
-    pdf.set_font("Arial", "", 11)
+    pdf.set_font("Arial", "", 10)
     pdf.set_text_color(71, 85, 105) 
     pdf.multi_cell(0, 6, clean_text(results["executive_summary"]))
     pdf.ln(10)
     
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Phase Performance", ln=True)
+    pdf.cell(0, 10, "Compliance Master Ledger", ln=True)
     
     pdf.set_fill_color(241, 245, 249) 
-    pdf.set_font("Arial", "B", 10)
-    pdf.cell(140, 8, "Project Phase", border=1, fill=True)
-    pdf.cell(50, 8, "Compliance Score", border=1, fill=True, ln=True, align='C')
-    
-    pdf.set_font("Arial", "", 10)
-    pdf.set_text_color(71, 85, 105)
-    for phase, info in results["phases"].items():
-        pdf.cell(140, 8, clean_text(phase), border=1)
-        pdf.cell(50, 8, f"{info['score']}%", border=1, ln=True, align='C')
-    
-    pdf.ln(10)
-
-    # --- NEW PDF SECTION: FILE LOCATION MISMATCHES ---
     pdf.set_text_color(15, 23, 42)
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "File Location Tracker", ln=True)
+    pdf.set_font("Arial", "B", 9)
     
-    mismatches = get_location_mismatches(results)
-    if not mismatches:
-        pdf.set_font("Arial", "", 11)
-        pdf.set_text_color(22, 163, 74) # Green color for success
-        pdf.cell(0, 8, "All identified documents are perfectly placed in their designated phase folders.", ln=True)
-    else:
-        pdf.set_fill_color(254, 226, 226) 
-        pdf.set_text_color(153, 27, 27) 
-        pdf.set_font("Arial", "B", 10)
-        pdf.cell(70, 8, "Document", border=1, fill=True)
-        pdf.cell(60, 8, "Expected Phase", border=1, fill=True)
-        pdf.cell(60, 8, "Actual Location", border=1, fill=True, ln=True, align='C')
-        
-        pdf.set_font("Arial", "", 10)
-        pdf.set_text_color(71, 85, 105)
-        for m in mismatches:
-            pdf.cell(70, 8, clean_text(m["document"])[:35], border=1)
-            pdf.cell(60, 8, clean_text(m["expected"])[:30], border=1)
-            pdf.cell(60, 8, clean_text(m["actual"])[:30], border=1, ln=True, align='C')
+    col_widths = [22, 53, 35, 80]
+    draw_table_row(pdf, ["Phase", "Document Requirement", "Status / Location", "AI Diagnostics"], col_widths)
+    
+    pdf.set_font("Arial", "", 9)
+    pdf.set_text_color(71, 85, 105)
+    
+    for phase, info in results["phases"].items():
+        for d in info["documents"]:
+            if not d.get("actual_folder") or d.get("actual_folder") == "N/A": 
+                loc_status = "Missing"
+            elif d.get("wrong_folder"): 
+                loc_status = f"FAIL (In {d.get('actual_folder')})"
+            else: 
+                loc_status = "PASS" if d["pass"] else "FAIL"
+
+            draw_table_row(pdf, [
+                phase, 
+                d["document"], 
+                loc_status, 
+                d.get("comment", "")
+            ], col_widths)
 
     file_path = f"{clean_text(company)}_Compliance_Report.pdf"
-    pdf.output(file_path)
+    _ = pdf.output(file_path)
     return file_path
 
 
@@ -267,13 +276,12 @@ with st.sidebar:
                         extract_zip(target_zip_for_audit, company)
                         
                     results = run_pipeline(company, project_type, log_callback=file_logger, progress_callback=ui_progress)
-                    save_audit_history(company, results)
+                    _ = save_audit_history(company, results)
                     status_box.update(label="✅ Complete!", state="complete", expanded=False)
                     
                 st.session_state.audit_results = results
                 st.session_state.audit_company = company
                 st.rerun() 
-
 
 if st.session_state.audit_results is None:
     st.title("MINT Intelligence Dashboard")
@@ -316,22 +324,27 @@ else:
                 fill='toself', line=dict(color='#3b82f6', width=2), fillcolor='rgba(59, 130, 246, 0.2)'
             ))
             radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), margin=dict(l=40, r=40, t=20, b=20), height=320)
-            st.plotly_chart(radar, use_container_width=True)
+            _ = st.plotly_chart(radar, use_container_width=True) 
 
-    # --- NEW UI SECTION: FILE LOCATION TRACKER ---
     with col_right:
         with st.container(border=True):
             st.subheader("File Location Tracker")
-            mismatches = get_location_mismatches(results)
-            
-            if not mismatches:
-                st.success("All identified documents are perfectly placed in their correct folders! 📁✅")
+            gaps = top_gaps(results)
+            if not gaps:
+                st.success("Operational integrity verified. No critical gaps found. 🎉")
             else:
-                st.error(f"Found {len(mismatches)} misplaced documents.")
-                for m in mismatches:
-                    with st.expander(f"🚫 {m['document']}"):
-                        st.write(f"**Should be in:** `{m['expected']}`")
-                        st.write(f"**Actually found in:** `{m['actual']}`")
+                for phase, doc, score, wrong_folder, actual_folder in gaps:
+                    icon = "📁" if wrong_folder else "⚠️"
+                    with st.expander(f"{icon} {doc} (Score: {score}%)"):
+                        st.write(f"**Target Phase:** {phase}")
+                        if wrong_folder:
+                            st.error(f"Found in wrong location: `{actual_folder}`")
+                        ai_comment = "No specific diagnostic."
+                        for d in results["phases"][phase]["documents"]:
+                            if d["document"] == doc:
+                                ai_comment = d.get("comment", ai_comment)
+                                break
+                        st.caption(f"**AI Notes:** {ai_comment}")
 
     with st.container(border=True):
         st.subheader("Compliance Master Ledger")
@@ -352,7 +365,7 @@ else:
                 })
         
         df_ledger = pd.DataFrame(table_data)
-        st.dataframe(
+        _ = st.dataframe( 
             df_ledger,
             column_config={"Score": st.column_config.ProgressColumn("Health Score", format="%f%%", min_value=0, max_value=100)},
             use_container_width=True, hide_index=True, height=300
@@ -363,8 +376,8 @@ else:
     with dl_col1:
         pdf_path = generate_pdf(comp, results)
         with open(pdf_path, "rb") as f:
-            st.download_button("📄 Download Executive PDF", f, file_name=pdf_path, mime="application/pdf", use_container_width=True, type="primary")
+            _ = st.download_button("📄 Download Executive PDF", f, file_name=pdf_path, mime="application/pdf", use_container_width=True, type="primary")
 
     with dl_col2:
         csv_bytes = df_ledger.to_csv(index=False).encode('utf-8')
-        st.download_button("📊 Download Ledger CSV", data=csv_bytes, file_name=f"{clean_text(comp)}_Audit_Ledger.csv", mime="text/csv", use_container_width=True)
+        _ = st.download_button("📊 Download Ledger CSV", data=csv_bytes, file_name=f"{clean_text(comp)}_Audit_Ledger.csv", mime="text/csv", use_container_width=True)

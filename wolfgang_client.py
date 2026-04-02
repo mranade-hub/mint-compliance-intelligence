@@ -9,7 +9,6 @@ ASSISTANT_SELECTOR = "div.chat-assistant"
 BASE_DIR = os.path.dirname(__file__)
 SESSION_FILE = os.path.join(BASE_DIR, "session.json")
 
-
 class WolfgangClient:
 
     def __init__(self):
@@ -50,7 +49,6 @@ class WolfgangClient:
     def clear_chat(self):
         """Forces a completely new chat session to wipe the token memory clean."""
         try:
-            # Navigating to the root URL forces a fresh session ID in most LLM UIs
             self.page.goto(BASE_URL, wait_until="domcontentloaded")
             self.page.wait_for_selector(CHAT_INPUT_SELECTOR, state="visible", timeout=60000)
             self.page.wait_for_timeout(3000) 
@@ -58,6 +56,7 @@ class WolfgangClient:
             print(f"Failed to clear chat: {e}")
 
     def _force_ui_upload_menu(self):
+        """Raw JavaScript injection to bypass Playwright stability checks"""
         self.page.evaluate("""() => {
             const btn = document.querySelector("#input-menu-button");
             if(btn) btn.click();
@@ -114,16 +113,11 @@ class WolfgangClient:
         page.wait_for_timeout(1000)
         page.keyboard.press("Enter")
         
-        # Give the AI time to actually start generating before we begin checking for stability
-        # This prevents premature overlaps if an error flashes on screen
         page.wait_for_timeout(5000)
-        
         page.wait_for_selector("div.chat-assistant", timeout=300000)
 
         last_text = ""
         stable_count = 0
-        
-        # Increased stability requirement to 4 checks (8 seconds of no text changing) to ensure it is 100% finished
         while stable_count < 4:
             page.wait_for_timeout(2000)
             blocks = page.locator("div.chat-assistant")
@@ -133,7 +127,6 @@ class WolfgangClient:
             else:
                 stable_count = 0
                 last_text = current
-                
         return last_text.strip()
 
     def close(self):
