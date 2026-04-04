@@ -5,6 +5,7 @@ import datetime
 import asyncio
 import re
 import shutil
+import zipfile
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -15,7 +16,6 @@ import plotly.express as px
 import plotly.graph_objects as go
 from fpdf import FPDF
 
-from utils import extract_zip
 from pipeline import run_pipeline
 from drive_utils import get_drive_service, search_folders_by_name, get_subfolders, download_folder_recursively
 from logger_utils import append_log
@@ -71,7 +71,6 @@ def top_gaps(results):
                 gaps.append((phase, d["document"], d["score"], d.get("wrong_folder", False), d.get("actual_folder", "N/A")))
     return sorted(gaps, key=lambda x: x[2])[:5]
 
-# --- PDF GENERATION WITH MULTI-CELL WRAPPING ---
 class ExecutivePDF(FPDF):
     def __init__(self, company):
         super().__init__()
@@ -96,31 +95,45 @@ class ExecutivePDF(FPDF):
         self.set_text_color(148, 163, 184) 
         self.cell(0, 10, f"Generated for {self.company} on {self.timestamp} | Page {self.page_no()}", align='C')
 
+# --- UPGRADED PERFECT-BORDER TABLE FUNCTION ---
 def draw_table_row(pdf, data, widths, line_height=6):
+    """Calculates exact height and draws clean, unified grid borders for wrapped text"""
     max_lines = 1
     for i, text in enumerate(data):
         text = clean_text(str(text))
-        eff_width = widths[i] - 2 
-        string_width = pdf.get_string_width(text)
-        lines = int(string_width / eff_width) + 1
-        lines = max(lines, len(text.split('\n')))
-        if lines > max_lines: max_lines = lines
+        eff_width = widths[i] - 3 
+        words = text.split()
+        line_count = 1
+        curr_w = 0
+        for w in words:
+            w_len = pdf.get_string_width(w + " ")
+            if curr_w + w_len > eff_width:
+                line_count += 1
+                curr_w = w_len
+            else:
+                curr_w += w_len
+        line_count += text.count('\n')
+        if line_count > max_lines: max_lines = line_count
         
-    row_height = max_lines * line_height
+    row_h = (max_lines * line_height) + 2
     
-    if pdf.get_y() + row_height > 270:
+    if pdf.get_y() + row_h > 275:
         pdf.add_page()
         
-    x_start = pdf.get_x()
-    y_start = pdf.get_y()
+    x = pdf.get_x()
+    y = pdf.get_y()
     
     for i, text in enumerate(data):
-        text = clean_text(str(text))
-        pdf.set_xy(x_start, y_start)
-        pdf.multi_cell(widths[i], line_height, text, border=1, align='L')
-        x_start += widths[i]
+        # Draw a perfect unified border box for the cell
+        pdf.rect(x, y, widths[i], row_h)
         
-    pdf.set_xy(10, y_start + row_height)
+        # Insert the wrapped text inside WITHOUT internal borders
+        pdf.set_xy(x, y + 1)
+        pdf.multi_cell(widths[i], line_height, clean_text(str(text)), border=0, align='L')
+        
+        x += widths[i]
+        
+    pdf.set_xy(10, y + row_h)
 
 def generate_pdf(company, results):
     pdf = ExecutivePDF(company)
@@ -149,7 +162,38 @@ def generate_pdf(company, results):
     pdf.set_font("Arial", "", 10)
     pdf.set_text_color(71, 85, 105) 
     pdf.multi_cell(0, 6, clean_text(results["executive_summary"]))
-    pdf.ln(10)
+    pdf.ln(5)
+    
+    # --- RADAR CHART (INTENTIONALLY DISABLED FOR STABILITY) ---
+    # try:
+    #     phase_names, phase_scores = [], []
+    #     for phase, info in results["phases"].items():
+    #         phase_names.append(phase)
+    #         phase_scores.append(info["score"])
+
+    #     radar_pdf = go.Figure()
+    #     radar_pdf.add_trace(go.Scatterpolar(
+    #         r=phase_scores + [phase_scores[0]] if phase_scores else [],
+    #         theta=phase_names + [phase_names[0]] if phase_names else [],
+    #         fill='toself', line=dict(color='#3b82f6', width=2), fillcolor='rgba(59, 130, 246, 0.2)'
+    #     ))
+    #     radar_pdf.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), margin=dict(l=40, r=40, t=20, b=20), height=450, width=700)
+        
+    #     radar_pdf.write_image("temp_radar.png")
+        
+    #     current_y = pdf.get_y()
+    #     if current_y + 100 > 270:
+    #         pdf.add_page()
+    #         current_y = pdf.get_y()
+            
+    #     pdf.image("temp_radar.png", x=30, y=current_y, w=150)
+    #     pdf.set_y(current_y + 100)
+    #     pdf.ln(5)
+    # except Exception as e:
+    #     pdf.set_font("Arial", "I", 10)
+    #     pdf.set_text_color(220, 38, 38)
+    #     pdf.cell(0, 10, "[Radar Chart missing: 'kaleido' package not installed. Run: pip install kaleido==0.1.0post1]", ln=True)
+    #     pdf.ln(5)
     
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 14)
@@ -181,7 +225,8 @@ def generate_pdf(company, results):
                 d.get("comment", "")
             ], col_widths)
 
-    file_path = f"{clean_text(company)}_Compliance_Report.pdf"
+    os.makedirs("results", exist_ok=True)
+    file_path = f"results/{clean_text(company)}_Compliance_Report.pdf"
     _ = pdf.output(file_path)
     return file_path
 
@@ -251,6 +296,10 @@ with st.sidebar:
                         os.makedirs(target_dir, exist_ok=True)
                         with st.spinner("Extracting..."):
                             download_folder_recursively(drive_service, target_folder['id'], target_dir)
+                        
+                        if os.path.exists("temp_downloads"):
+                            shutil.rmtree("temp_downloads")
+                            
                         st.success("Ready.")
                         drive_ready = True
                     except Exception as e: st.error(f"Failed: {e}")
@@ -272,8 +321,13 @@ with st.sidebar:
                         progress_bar.progress(current / total if total > 0 else 0, text=f"**{message}** ({int((current/total)*100 if total>0 else 0)}%)")
 
                     if target_zip_for_audit:
-                        file_logger("[SYSTEM] Unzipping payload...")
-                        extract_zip(target_zip_for_audit, company)
+                        file_logger("[SYSTEM] Unzipping payload securely into downloads directory...")
+                        target_dir = f"downloads/{company}"
+                        if os.path.exists(target_dir): shutil.rmtree(target_dir)
+                        os.makedirs(target_dir, exist_ok=True)
+                        
+                        with zipfile.ZipFile(target_zip_for_audit, 'r') as zip_ref:
+                            zip_ref.extractall(target_dir)
                         
                     results = run_pipeline(company, project_type, log_callback=file_logger, progress_callback=ui_progress)
                     _ = save_audit_history(company, results)
@@ -325,7 +379,7 @@ else:
             ))
             radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), margin=dict(l=40, r=40, t=20, b=20), height=320)
             _ = st.plotly_chart(radar, use_container_width=True) 
-
+            
     with col_right:
         with st.container(border=True):
             st.subheader("File Location Tracker")
@@ -373,10 +427,13 @@ else:
 
     st.subheader("Export Artifacts")
     dl_col1, dl_col2 = st.columns(2)
+    
+    os.makedirs("results", exist_ok=True)
+    
     with dl_col1:
         pdf_path = generate_pdf(comp, results)
         with open(pdf_path, "rb") as f:
-            _ = st.download_button("📄 Download Executive PDF", f, file_name=pdf_path, mime="application/pdf", use_container_width=True, type="primary")
+            _ = st.download_button("📄 Download Executive PDF", f, file_name=f"{clean_text(comp)}_Compliance_Report.pdf", mime="application/pdf", use_container_width=True, type="primary")
 
     with dl_col2:
         csv_bytes = df_ledger.to_csv(index=False).encode('utf-8')
