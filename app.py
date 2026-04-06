@@ -247,7 +247,7 @@ def generate_pdf(company, results):
 
 
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg", width=40)
+    st.image("logo.png", width=150)
     st.title("MINT Setup")
     
     company = st.text_input("Target Company")
@@ -353,7 +353,7 @@ with st.sidebar:
                 st.rerun() 
 
 if st.session_state.audit_results is None:
-    st.title("MINT Intelligence Dashboard")
+    st.title("MINT Audit Compliance")
     st.info("👈 Please configure mission parameters in the sidebar to initiate analysis.")
 else:
     results = st.session_state.audit_results
