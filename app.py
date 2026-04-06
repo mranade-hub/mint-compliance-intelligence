@@ -95,7 +95,7 @@ class ExecutivePDF(FPDF):
         self.set_text_color(148, 163, 184) 
         self.cell(0, 10, f"Generated for {self.company} on {self.timestamp} | Page {self.page_no()}", align='C')
 
-# --- UPGRADED PERFECT-BORDER TABLE FUNCTION ---
+# --- THE PERFECTED TABLE ENGINE ---
 def draw_table_row(pdf, data, widths, line_height=6):
     """Calculates exact height and draws clean, unified grid borders for wrapped text"""
     max_lines = 1
@@ -162,38 +162,53 @@ def generate_pdf(company, results):
     pdf.set_font("Arial", "", 10)
     pdf.set_text_color(71, 85, 105) 
     pdf.multi_cell(0, 6, clean_text(results["executive_summary"]))
-    pdf.ln(5)
+    pdf.ln(8)
     
-    # --- RADAR CHART (INTENTIONALLY DISABLED FOR STABILITY) ---
-    # try:
-    #     phase_names, phase_scores = [], []
-    #     for phase, info in results["phases"].items():
-    #         phase_names.append(phase)
-    #         phase_scores.append(info["score"])
-
-    #     radar_pdf = go.Figure()
-    #     radar_pdf.add_trace(go.Scatterpolar(
-    #         r=phase_scores + [phase_scores[0]] if phase_scores else [],
-    #         theta=phase_names + [phase_names[0]] if phase_names else [],
-    #         fill='toself', line=dict(color='#3b82f6', width=2), fillcolor='rgba(59, 130, 246, 0.2)'
-    #     ))
-    #     radar_pdf.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), margin=dict(l=40, r=40, t=20, b=20), height=450, width=700)
+    # --- NATIVE PDF VISUAL GRAPHIC ---
+    pdf.set_text_color(15, 23, 42)
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 10, "Phase Performance Visualizer", ln=True)
+    pdf.ln(2)
+    
+    pdf.set_font("Arial", "B", 10)
+    y_start = pdf.get_y()
+    
+    for phase, info in results["phases"].items():
+        score = info["score"]
         
-    #     radar_pdf.write_image("temp_radar.png")
+        # 1. Print Phase Name
+        pdf.set_text_color(71, 85, 105)
+        pdf.set_xy(15, y_start)
+        pdf.cell(45, 6, clean_text(phase))
         
-    #     current_y = pdf.get_y()
-    #     if current_y + 100 > 270:
-    #         pdf.add_page()
-    #         current_y = pdf.get_y()
+        # 2. Draw Background Bar (Gray)
+        pdf.set_fill_color(226, 232, 240) 
+        pdf.rect(65, y_start + 1, 100, 4, 'F')
+        
+        # 3. Dynamic Color Logic based on score
+        if score >= 85:
+            pdf.set_fill_color(34, 197, 94) # Green
+        elif score >= 70:
+            pdf.set_fill_color(234, 179, 8) # Yellow
+        elif score >= 50:
+            pdf.set_fill_color(249, 115, 22) # Orange
+        else:
+            pdf.set_fill_color(239, 68, 68) # Red
             
-    #     pdf.image("temp_radar.png", x=30, y=current_y, w=150)
-    #     pdf.set_y(current_y + 100)
-    #     pdf.ln(5)
-    # except Exception as e:
-    #     pdf.set_font("Arial", "I", 10)
-    #     pdf.set_text_color(220, 38, 38)
-    #     pdf.cell(0, 10, "[Radar Chart missing: 'kaleido' package not installed. Run: pip install kaleido==0.1.0post1]", ln=True)
-    #     pdf.ln(5)
+        # 4. Draw Foreground Bar (Color)
+        bar_width = max(1, score) 
+        pdf.rect(65, y_start + 1, bar_width, 4, 'F')
+        
+        # 5. Print Actual Score %
+        pdf.set_text_color(15, 23, 42)
+        pdf.set_xy(170, y_start)
+        pdf.cell(20, 6, f"{score}%")
+        
+        y_start += 8 # Move down for the next bar
+        
+    pdf.set_y(y_start + 8)
+    pdf.set_x(10)
+    # ----------------------------------------------------
     
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 14)
