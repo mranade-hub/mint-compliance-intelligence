@@ -23,7 +23,7 @@ from logger_utils import append_log
 st.set_page_config(layout="wide", page_title="MINT Command Center", initial_sidebar_state="expanded")
 
 MAIN_AUDIT_FOLDER_ID = "0BxOKDhjJWW08dk5lTXQ1M09XaVk" 
-BENCHMARK_SCORE = 68
+BENCHMARK_SCORE = 100
 
 if "audit_results" not in st.session_state: st.session_state.audit_results = None
 if "audit_company" not in st.session_state: st.session_state.audit_company = None
@@ -353,7 +353,7 @@ with st.sidebar:
                 st.rerun() 
 
 if st.session_state.audit_results is None:
-    st.title("MINT Audit Compliance")
+    st.title("MINT Audit Compliance Engine")
     st.info("👈 Please configure mission parameters in the sidebar to initiate analysis.")
 else:
     results = st.session_state.audit_results
@@ -371,7 +371,7 @@ else:
 
     st.divider()
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric(label="Overall Compliance", value=f"{overall}%", delta=f"{overall - BENCHMARK_SCORE}% vs Benchmark")
+    col_m1.metric(label="Overall Compliance", value=f"{overall}%")
     col_m2.metric(label="Document Pass Rate", value=f"{pass_rate}%")
     col_m3.metric(label="Maturity Level", value=maturity)
     col_m4.metric(label="Risk Assessment", value=results['risk_level'], delta="Critical Attention" if overall < 70 else "Healthy", delta_color="inverse")
@@ -436,7 +436,7 @@ else:
         df_ledger = pd.DataFrame(table_data)
         _ = st.dataframe( 
             df_ledger,
-            column_config={"Score": st.column_config.ProgressColumn("Health Score", format="%f%%", min_value=0, max_value=100)},
+            column_config={"Score": st.column_config.ProgressColumn("Health Score", format="%f%%", min_value=0, max_value=100, color='orange')},
             use_container_width=True, hide_index=True, height=300
         )
 
