@@ -107,10 +107,13 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
             avg_score = round(sum(d["score"] for d in phase_results) / len(phase_results), 2) if phase_results else 0
             final[phase] = {"documents": phase_results, "score": avg_score}
 
+        # --- NEW PHASE DETECTION LOGIC ---
+        # Starts at the first phase and moves forward. 
+        # The furthest phase with a score > 0 (meaning documents were actually found) becomes the detected phase.
         detected_phase = PHASE_ORDER[0]
         for phase in PHASE_ORDER:
-            if final.get(phase, {}).get("score", 0) >= 70: detected_phase = phase
-            else: break
+            if final.get(phase, {}).get("score", 0) > 0: 
+                detected_phase = phase
 
         active_phases = [p for p in PHASE_ORDER if final[p]["documents"]]
         overall_score = round(sum(final[p]["score"] for p in active_phases) / len(active_phases), 2) if active_phases else 0
