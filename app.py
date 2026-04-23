@@ -23,7 +23,6 @@ from logger_utils import append_log
 st.set_page_config(layout="wide", page_title="MINT Command Center", initial_sidebar_state="expanded")
 
 MAIN_AUDIT_FOLDER_ID = "0BxOKDhjJWW08dk5lTXQ1M09XaVk" 
-BENCHMARK_SCORE = 100
 
 if "audit_results" not in st.session_state: st.session_state.audit_results = None
 if "audit_company" not in st.session_state: st.session_state.audit_company = None
@@ -49,6 +48,8 @@ def clean_text(text):
 def save_audit_history(company, results):
     os.makedirs("audit_history", exist_ok=True)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    # Inject timestamp for benchmark comparison
+    results["audit_timestamp"] = timestamp
     with open(f"audit_history/{company}_{timestamp}.json", "w") as f:
         json.dump(results, f)
 
@@ -59,16 +60,20 @@ def load_company_history(company):
         if file.startswith(company):
             with open(os.path.join("audit_history", file)) as f:
                 data = json.load(f)
-                data["timestamp"] = file.split("_")[1]
+                if "timestamp" not in data:
+                    data["timestamp"] = file.split("_")[1]
                 history.append(data)
-    return sorted(history, key=lambda x: x["timestamp"], reverse=True)
+    # Sort chronologically descending
+    return sorted(history, key=lambda x: x.get("audit_timestamp", x.get("timestamp")), reverse=True)
 
 def top_gaps(results):
     gaps = []
     for phase, info in results["phases"].items():
         for d in info["documents"]:
-            if not d["pass"] or d.get("wrong_folder"): 
-                gaps.append((phase, d["document"], d["score"], d.get("wrong_folder", False), d.get("actual_folder", "N/A")))
+            if not d["pass"]: 
+                gaps.append((phase, d["document"], d["score"], False, d.get("actual_folder", "N/A")))
+            elif d.get("wrong_folder"):
+                gaps.append((phase, d["document"], d["score"], True, d.get("actual_folder", "N/A")))
     return sorted(gaps, key=lambda x: x[2])[:5]
 
 class ExecutivePDF(FPDF):
@@ -86,7 +91,7 @@ class ExecutivePDF(FPDF):
         self.set_y(15)
         self.set_font("Arial", "B", 18)
         self.set_text_color(248, 250, 252) 
-        self.cell(0, 10, "COMPLIANCE EXECUTIVE BRIEF", ln=True, align='C')
+        self.cell(0, 10, "ADHERENCE EXECUTIVE BRIEF", ln=True, align='C')
         self.set_y(45)
 
     def footer(self):
@@ -124,13 +129,9 @@ def draw_table_row(pdf, data, widths, line_height=6):
     y = pdf.get_y()
     
     for i, text in enumerate(data):
-        # Draw a perfect unified border box for the cell
         pdf.rect(x, y, widths[i], row_h)
-        
-        # Insert the wrapped text inside WITHOUT internal borders
         pdf.set_xy(x, y + 1)
         pdf.multi_cell(widths[i], line_height, clean_text(str(text)), border=0, align='L')
-        
         x += widths[i]
         
     pdf.set_xy(10, y + row_h)
@@ -142,7 +143,7 @@ def generate_pdf(company, results):
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 14)
     pdf.cell(100, 10, f"Target Entity: {pdf.company}", ln=False)
-    pdf.cell(90, 10, f"Overall Score: {results['overall_score']}%", ln=True, align='R')
+    pdf.cell(90, 10, f"Overall Adherence: {results['overall_score']}%", ln=True, align='R')
     
     pdf.set_font("Arial", "", 12)
     pdf.cell(100, 8, f"Detected Phase: {clean_text(results['detected_phase'])}", ln=False)
@@ -176,43 +177,37 @@ def generate_pdf(company, results):
     for phase, info in results["phases"].items():
         score = info["score"]
         
-        # 1. Print Phase Name
         pdf.set_text_color(71, 85, 105)
         pdf.set_xy(15, y_start)
         pdf.cell(45, 6, clean_text(phase))
         
-        # 2. Draw Background Bar (Gray)
         pdf.set_fill_color(226, 232, 240) 
         pdf.rect(65, y_start + 1, 100, 4, 'F')
         
-        # 3. Dynamic Color Logic based on score
         if score >= 85:
-            pdf.set_fill_color(34, 197, 94) # Green
+            pdf.set_fill_color(34, 197, 94) 
         elif score >= 70:
-            pdf.set_fill_color(234, 179, 8) # Yellow
+            pdf.set_fill_color(234, 179, 8) 
         elif score >= 50:
-            pdf.set_fill_color(249, 115, 22) # Orange
+            pdf.set_fill_color(249, 115, 22) 
         else:
-            pdf.set_fill_color(239, 68, 68) # Red
+            pdf.set_fill_color(239, 68, 68) 
             
-        # 4. Draw Foreground Bar (Color)
         bar_width = max(1, score) 
         pdf.rect(65, y_start + 1, bar_width, 4, 'F')
         
-        # 5. Print Actual Score %
         pdf.set_text_color(15, 23, 42)
         pdf.set_xy(170, y_start)
         pdf.cell(20, 6, f"{score}%")
         
-        y_start += 8 # Move down for the next bar
+        y_start += 8 
         
     pdf.set_y(y_start + 8)
     pdf.set_x(10)
-    # ----------------------------------------------------
     
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Compliance Master Ledger", ln=True)
+    pdf.cell(0, 10, "Adherence Master Ledger", ln=True)
     
     pdf.set_fill_color(241, 245, 249) 
     pdf.set_text_color(15, 23, 42)
@@ -229,7 +224,7 @@ def generate_pdf(company, results):
             if not d.get("actual_folder") or d.get("actual_folder") == "N/A": 
                 loc_status = "Missing"
             elif d.get("wrong_folder"): 
-                loc_status = f"FAIL (In {d.get('actual_folder')})"
+                loc_status = f"PASS w/ Warning (In {d.get('actual_folder')})" if d["pass"] else f"FAIL (In {d.get('actual_folder')})"
             else: 
                 loc_status = "PASS" if d["pass"] else "FAIL"
 
@@ -241,13 +236,13 @@ def generate_pdf(company, results):
             ], col_widths)
 
     os.makedirs("results", exist_ok=True)
-    file_path = f"results/{clean_text(company)}_Compliance_Report.pdf"
+    file_path = f"results/{clean_text(company)}_Adherence_Report.pdf"
     _ = pdf.output(file_path)
     return file_path
 
 
 with st.sidebar:
-    st.image("logo.png", width=150)
+    st.image("https://upload.wikimedia.org/wikipedia/commons/1/12/Google_Drive_icon_%282020%29.svg", width=40)
     st.title("MINT Setup")
     
     company = st.text_input("Target Company")
@@ -265,7 +260,7 @@ with st.sidebar:
             history = load_company_history(company)
             if not history: st.warning("No previous audits found.")
             else:
-                options = {f"Audit: {h['timestamp']} (Score: {h['overall_score']}%)": h for h in history}
+                options = {f"Audit: {h.get('timestamp', h.get('audit_timestamp', 'Unknown'))} (Score: {h['overall_score']}%)": h for h in history}
                 if st.button("🔄 LOAD DASHBOARD", type="primary", use_container_width=True):
                     st.session_state.audit_results = options[st.selectbox("Select Audit:", list(options.keys()))]
                     st.session_state.audit_company = company
@@ -353,7 +348,7 @@ with st.sidebar:
                 st.rerun() 
 
 if st.session_state.audit_results is None:
-    st.title("MINT Audit Compliance Engine")
+    st.title("MINT Intelligence Dashboard")
     st.info("👈 Please configure mission parameters in the sidebar to initiate analysis.")
 else:
     results = st.session_state.audit_results
@@ -369,9 +364,22 @@ else:
     st.title(f"Intelligence Brief: {comp}")
     st.caption(f"DETECTED PROJECT PHASE: **{results['detected_phase'].upper()}**")
 
+    # --- DYNAMIC BENCHMARK LOGIC ---
+    current_ts = results.get("audit_timestamp", results.get("timestamp", ""))
+    history = load_company_history(comp)
+    
+    # Isolate history records strictly older than the current report being viewed
+    older_audits = [h for h in history if h.get("audit_timestamp", h.get("timestamp", "")) < current_ts]
+    
+    if older_audits:
+        benchmark_score = older_audits[0]["overall_score"]
+        delta_val = f"{round(overall - benchmark_score, 1)}% vs Last Audit"
+    else:
+        delta_val = "First Audit (No Benchmark)"
+
     st.divider()
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric(label="Overall Compliance", value=f"{overall}%")
+    col_m1.metric(label="Overall Adherence", value=f"{overall}%", delta=delta_val)
     col_m2.metric(label="Document Pass Rate", value=f"{pass_rate}%")
     col_m3.metric(label="Maturity Level", value=maturity)
     col_m4.metric(label="Risk Assessment", value=results['risk_level'], delta="Critical Attention" if overall < 70 else "Healthy", delta_color="inverse")
@@ -403,11 +411,11 @@ else:
                 st.success("Operational integrity verified. No critical gaps found. 🎉")
             else:
                 for phase, doc, score, wrong_folder, actual_folder in gaps:
-                    icon = "📁" if wrong_folder else "⚠️"
+                    icon = "⚠️" if wrong_folder else "❌"
                     with st.expander(f"{icon} {doc} (Score: {score}%)"):
                         st.write(f"**Target Phase:** {phase}")
                         if wrong_folder:
-                            st.error(f"Found in wrong location: `{actual_folder}`")
+                            st.warning(f"Found in sub/wrong folder: `{actual_folder}`")
                         ai_comment = "No specific diagnostic."
                         for d in results["phases"][phase]["documents"]:
                             if d["document"] == doc:
@@ -416,13 +424,14 @@ else:
                         st.caption(f"**AI Notes:** {ai_comment}")
 
     with st.container(border=True):
-        st.subheader("Compliance Master Ledger")
+        st.subheader("Adherence Master Ledger")
         
         table_data = []
         for phase, info in results["phases"].items():
             for d in info["documents"]:
                 if not d.get("actual_folder") or d.get("actual_folder") == "N/A": loc_status = "⚠️ Missing"
-                elif d.get("wrong_folder"): loc_status = f"🚫 Wrong Folder ({d.get('actual_folder')})"
+                elif d.get("wrong_folder"): 
+                    loc_status = f"⚠️ PASS w/ Warning ({d.get('actual_folder')})" if d["pass"] else f"🚫 FAIL ({d.get('actual_folder')})"
                 else: loc_status = "✅ Correct"
 
                 table_data.append({
@@ -436,7 +445,7 @@ else:
         df_ledger = pd.DataFrame(table_data)
         _ = st.dataframe( 
             df_ledger,
-            column_config={"Score": st.column_config.ProgressColumn("Health Score", format="%f%%", min_value=0, max_value=100, color='orange')},
+            column_config={"Score": st.column_config.ProgressColumn("Health Score", format="%f%%", min_value=0, max_value=100)},
             use_container_width=True, hide_index=True, height=300
         )
 
@@ -448,8 +457,8 @@ else:
     with dl_col1:
         pdf_path = generate_pdf(comp, results)
         with open(pdf_path, "rb") as f:
-            _ = st.download_button("📄 Download Executive PDF", f, file_name=f"{clean_text(comp)}_Compliance_Report.pdf", mime="application/pdf", use_container_width=True, type="primary")
+            _ = st.download_button("📄 Download Executive PDF", f, file_name=f"{clean_text(comp)}_Adherence_Report.pdf", mime="application/pdf", use_container_width=True, type="primary")
 
     with dl_col2:
         csv_bytes = df_ledger.to_csv(index=False).encode('utf-8')
-        _ = st.download_button("📊 Download Ledger CSV", data=csv_bytes, file_name=f"{clean_text(comp)}_Audit_Ledger.csv", mime="text/csv", use_container_width=True)
+        _ = st.download_button("📊 Download Ledger CSV", data=csv_bytes, file_name=f"{clean_text(comp)}_Adherence_Ledger.csv", mime="text/csv", use_container_width=True)

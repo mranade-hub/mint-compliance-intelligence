@@ -89,14 +89,14 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
                     phase_keyword = phase.split()[0].lower() 
                     if phase_keyword not in file_path.lower():
                         wrong_folder = True
-                        best_score -= 10 
+                        # Removed the harsh 10-point penalty for being in the wrong folder
 
                 comment = best_quality.get("short_summary", "")
                 
                 if wrong_folder:
                     comment = f"⚠️ Wrong Folder ({actual_folder}). " + comment
                 elif not comment:
-                    comment = "Complete and compliant." if best_score >= 70 else "Incomplete or template-based."
+                    comment = "Complete and adherent." if best_score >= 70 else "Incomplete or template-based."
 
                 phase_results.append({
                     "document": doc, "quality": best_quality, "score": max(0, best_score),
@@ -107,19 +107,21 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
             avg_score = round(sum(d["score"] for d in phase_results) / len(phase_results), 2) if phase_results else 0
             final[phase] = {"documents": phase_results, "score": avg_score}
 
-        # --- NEW PHASE DETECTION LOGIC ---
-        # Starts at the first phase and moves forward. 
-        # The furthest phase with a score > 0 (meaning documents were actually found) becomes the detected phase.
+        # --- SMART PHASE DETECTION & SCORING LOGIC ---
         detected_phase = PHASE_ORDER[0]
         for phase in PHASE_ORDER:
-            if final.get(phase, {}).get("score", 0) > 0: 
+            has_real_docs = any(d["score"] >= 50 for d in final[phase]["documents"])
+            if has_real_docs: 
                 detected_phase = phase
 
-        active_phases = [p for p in PHASE_ORDER if final[p]["documents"]]
+        detected_index = PHASE_ORDER.index(detected_phase)
+        active_phases = PHASE_ORDER[:detected_index + 1]
         overall_score = round(sum(final[p]["score"] for p in active_phases) / len(active_phases), 2) if active_phases else 0
 
         risk = "🟢 Low Risk" if overall_score >= 85 else "🟡 Moderate Risk" if overall_score >= 70 else "🟠 High Risk" if overall_score >= 50 else "🔴 Critical Risk"
-        executive_summary = f"Project assessed at {detected_phase} phase with {overall_score}% compliance. Classified as {risk}."
+        
+        # Updated Terminology
+        executive_summary = f"Project assessed at {detected_phase} phase with {overall_score}% adherence. Classified as {risk}."
 
         return {
             "overall_score": overall_score, "detected_phase": detected_phase,
