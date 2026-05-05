@@ -18,6 +18,8 @@ downloads/
 temp_downloads/
 logs/
 audit_history/
+temp_signatures/
+results/
 *.pdf
 *.zip
 

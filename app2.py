@@ -15,6 +15,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from fpdf import FPDF
 
+# Ensure your run_pipeline function is updated to accept the new arguments!
 from pipeline import run_pipeline
 from drive_utils import get_drive_service, search_folders_by_name, get_subfolders, download_folder_recursively
 from logger_utils import append_log
@@ -24,7 +25,7 @@ from logger_utils import append_log
 # ─────────────────────────────────────────────
 st.set_page_config(
     layout="wide",
-    page_title="MINT - Adherence Intelligence",
+    page_title="MINT - Compliance Intelligence",
     page_icon="◈",
     initial_sidebar_state="expanded"
 )
@@ -368,12 +369,12 @@ def load_company_history(company):
 
 def top_gaps(results):
     gaps = []
-    for phase, info in results["phases"].items():
-        for d in info["documents"]:
-            if not d["pass"]:
-                gaps.append((phase, d["document"], d["score"], False, d.get("actual_folder", "N/A")))
+    for phase, info in results.get("phases", {}).items():
+        for d in info.get("documents", []):
+            if not d.get("pass"):
+                gaps.append((phase, d["document"], d.get("score", 0), False, d.get("actual_folder", "N/A")))
             elif d.get("wrong_folder"):
-                gaps.append((phase, d["document"], d["score"], True, d.get("actual_folder", "N/A")))
+                gaps.append((phase, d["document"], d.get("score", 0), True, d.get("actual_folder", "N/A")))
     return sorted(gaps, key=lambda x: x[2])[:6]
 
 
@@ -386,7 +387,7 @@ class ExecutivePDF(FPDF):
         self.company = clean_text(company)
         self.timestamp = datetime.datetime.now().strftime("%B %d, %Y - %H:%M")
         self.set_margins(15, 15, 15)
-        self.is_cover = True  # Flag to disable headers/footers on the cover page
+        self.is_cover = True  
 
     def header(self):
         if self.is_cover: return
@@ -400,7 +401,7 @@ class ExecutivePDF(FPDF):
         self.set_y(12)
         self.set_font("Arial", "B", 16)
         self.set_text_color(241, 245, 249)
-        self.cell(0, 8, "Adherence INTELLIGENCE BRIEF", ln=True, align='L')
+        self.cell(0, 8, "COMPLIANCE INTELLIGENCE BRIEF", ln=True, align='L')
         self.set_font("Arial", "", 9)
         self.set_text_color(148, 163, 184)
         self.cell(0, 5, f"Automated Adherence Report for {self.company}", ln=True, align='L')
@@ -415,21 +416,18 @@ class ExecutivePDF(FPDF):
         self.set_draw_color(226, 232, 240)
         self.set_line_width(0.2)
         self.line(15, self.get_y() - 2, 195, self.get_y() - 2)
-        self.cell(0, 8, f"{self.timestamp}  |  Page {self.page_no()}", align='C')
+        self.cell(0, 8, f"Confidential  |  {self.timestamp}  |  Page {self.page_no()}", align='C')
 
 def draw_kpi_card(pdf, x, y, w, h, label, value, val_color=(15, 23, 42)):
-    """Draws a UI-like metric card on the PDF."""
-    pdf.set_fill_color(248, 250, 252) # Slate 50
-    pdf.set_draw_color(226, 232, 240) # Slate 200
+    pdf.set_fill_color(248, 250, 252)
+    pdf.set_draw_color(226, 232, 240)
     pdf.rect(x, y, w, h, 'DF')
     
-    # Label
     pdf.set_xy(x, y + 4)
     pdf.set_font("Arial", "B", 8)
     pdf.set_text_color(100, 116, 139)
     pdf.cell(w, 4, label, align='C')
     
-    # Value
     pdf.set_xy(x, y + 10)
     pdf.set_font("Arial", "B", 15)
     pdf.set_text_color(*val_color)
@@ -489,36 +487,30 @@ def generate_pdf(company, results):
     # --- 1. COVER PAGE ---
     pdf.add_page()
     pdf.set_fill_color(8, 12, 20)
-    pdf.rect(0, 0, 210, 297, 'F') # Dark background
+    pdf.rect(0, 0, 210, 297, 'F') 
     
     current_y = 80
-    
-    # --- AUTOMATIC LOGO INJECTION ---
-    # Make sure a file named 'my_logo.png' is in the same folder as this script
-    my_logo_path = "logo.png" 
+    my_logo_path = "my_logo.png" 
     
     if os.path.exists(my_logo_path):
         try:
-            # Centers the logo. Adjust 'y' to move it up/down, and 'w' to change size.
-            pdf.image(my_logo_path, x=82.5, y=30, w=45)
-            current_y = 105 # Pushes the text down so it doesn't overlap the logo
+            pdf.image(my_logo_path, x=85, y=35, w=40)
+            current_y = 95 
         except Exception:
-            pass # Fails safely if the image format is unsupported
+            pass 
 
     pdf.set_y(current_y)
-    pdf.set_font("Arial", "B", 16)
+    pdf.set_font("Arial", "B", 14)
     pdf.set_text_color(59, 130, 246)
-    pdf.cell(0, 10, "M I N T", align='C', ln=True)
+    pdf.cell(0, 10, "M I N T .", align='C', ln=True)
     
     pdf.set_font("Arial", "B", 26)
     pdf.set_text_color(241, 245, 249)
     pdf.cell(0, 14, "Executive Adherence Report", align='C', ln=True)
     
-    # Center Accent Line
     pdf.set_fill_color(37, 99, 235)
     pdf.rect(85, pdf.get_y() + 4, 40, 2, 'F') 
     
-    # Dynamic Client Company Name
     pdf.set_y(pdf.get_y() + 18)
     pdf.set_font("Arial", "", 11)
     pdf.set_text_color(148, 163, 184)
@@ -528,17 +520,16 @@ def generate_pdf(company, results):
     pdf.set_text_color(255, 255, 255)
     pdf.cell(0, 12, f"{pdf.company}", align='C', ln=True)
     
-    pdf.set_y(270)
+    pdf.set_y(260)
     pdf.set_font("Arial", "", 9)
     pdf.set_text_color(148, 163, 184)
     pdf.cell(0, 5, f"Generated: {pdf.timestamp}", align='C', ln=True)
-    # pdf.cell(0, 5, "CONFIDENTIAL", align='C', ln=True)
+    pdf.cell(0, 5, "CONFIDENTIAL", align='C', ln=True)
     
     # --- 2. MAIN CONTENT PAGE ---
-    pdf.is_cover = False # Turn on standard headers
+    pdf.is_cover = False
     pdf.add_page()
 
-    # Metrics Row (4 Cards)
     total_docs = sum(len(p.get("documents", [])) for p in results.get("phases", {}).values())
     passed_docs = sum(1 for p in results.get("phases", {}).values() for d in p.get("documents", []) if d.get("pass"))
     pass_rate = f"{round(passed_docs / total_docs * 100, 1)}%" if total_docs > 0 else "0%"
@@ -554,7 +545,6 @@ def generate_pdf(company, results):
     
     pdf.set_y(card_y + 30)
 
-    # Executive Summary
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "Executive Summary", ln=True)
@@ -563,7 +553,6 @@ def generate_pdf(company, results):
     pdf.multi_cell(0, 6, clean_text(results.get("executive_summary", "No summary provided.")))
     pdf.ln(6)
 
-    # Phase Performance (Horizontal Bars)
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", "B", 12)
     pdf.cell(0, 8, "Phase Performance Pipeline", ln=True)
@@ -578,11 +567,9 @@ def generate_pdf(company, results):
         pdf.set_font("Arial", "B", 9)
         pdf.cell(45, 5, clean_text(phase))
         
-        # Track Background
         pdf.set_fill_color(226, 232, 240)
         pdf.rect(65, y_start + 1.5, 100, 3, 'F')
         
-        # Score Fill
         if   score >= 85: pdf.set_fill_color(34, 197, 94)
         elif score >= 70: pdf.set_fill_color(163, 230, 53)
         elif score >= 50: pdf.set_fill_color(249, 115, 22)
@@ -608,7 +595,6 @@ def generate_pdf(company, results):
         pdf.ln(2)
         
         for phase, doc, score, wrong_folder, actual_folder in gaps:
-            # Draw a subtle card for each gap
             gap_y = pdf.get_y()
             if gap_y > 260:
                 pdf.add_page()
@@ -617,18 +603,15 @@ def generate_pdf(company, results):
             pdf.set_fill_color(250, 250, 250)
             pdf.rect(15, gap_y, 180, 16, 'F')
             
-            # Left accent border
-            if wrong_folder: pdf.set_fill_color(245, 158, 11) # Amber
-            else:            pdf.set_fill_color(239, 68, 68)  # Red
+            if wrong_folder: pdf.set_fill_color(245, 158, 11) 
+            else:            pdf.set_fill_color(239, 68, 68)  
             pdf.rect(15, gap_y, 2, 16, 'F')
             
-            # Gap Text
             pdf.set_xy(20, gap_y + 2)
             pdf.set_font("Arial", "B", 9)
             pdf.set_text_color(15, 23, 42)
             pdf.cell(140, 5, clean_text(doc))
             
-            # Tag
             pdf.set_xy(160, gap_y + 2)
             pdf.set_font("Arial", "B", 8)
             tag_text = "MISPLACED" if wrong_folder else "MISSING"
@@ -672,6 +655,36 @@ def generate_pdf(company, results):
                            col_widths, fill_color=bg_color, text_colors=text_colors)
             row_idx += 1
 
+    # --- 5. SIGNATURE CAPTURES ---
+    # Check if any document contains a signature image path returned from the pipeline
+    has_signatures = any(d.get("signature_image_path") for phase, info in results.get("phases", {}).items() for d in info.get("documents", []))
+    
+    if has_signatures:
+        pdf.add_page()
+        pdf.set_text_color(15, 23, 42)
+        pdf.set_font("Arial", "B", 14)
+        pdf.cell(0, 8, "Signature Verification Captures", ln=True)
+        pdf.ln(4)
+        
+        for phase, info in results.get("phases", {}).items():
+            for d in info.get("documents", []):
+                sig_path = d.get("signature_image_path")
+                if sig_path and os.path.exists(sig_path):
+                    if pdf.get_y() > 220:  # Prevent images from breaking across pages badly
+                        pdf.add_page()
+                        
+                    pdf.set_font("Arial", "B", 10)
+                    pdf.set_text_color(71, 85, 105)
+                    pdf.cell(0, 6, f"Document: {clean_text(d.get('document', 'Unknown'))} ({phase} Phase)", ln=True)
+                    
+                    try:
+                        # Renders the signature image, capped at 180mm width
+                        pdf.image(sig_path, x=15, w=180)
+                        pdf.ln(8) 
+                    except Exception as e:
+                        pdf.set_text_color(239, 68, 68)
+                        pdf.cell(0, 6, f"[Error loading signature image for {clean_text(d.get('document', 'Unknown'))}]", ln=True)
+
     os.makedirs("results", exist_ok=True)
     file_path = f"results/{clean_text(company)}_Adherence_Report.pdf"
     pdf.output(file_path)
@@ -686,7 +699,7 @@ with st.sidebar:
     <div style="padding: 24px 0 20px 0; border-bottom: 1px solid rgba(99,179,237,0.1); margin-bottom: 24px;">
         <div class="sidebar-logo">◈ MINT<span>.</span></div>
         <div style="font-size:0.72rem; color:#475569; margin-top:4px; letter-spacing:0.06em; text-transform:uppercase;">
-            Adherence Intelligence Platform
+            Compliance Intelligence Platform
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -701,6 +714,13 @@ with st.sidebar:
         label_visibility="visible"
     )
 
+    # --- NEW DROPDOWN FOR FORCING PHASE ---
+    forced_phase = st.selectbox(
+        "Force Project Phase",
+        ["Auto-Detect", "Engage", "Design", "Build", "Execute", "Test", "Hypercare & Project Closure"],
+        help="If Auto-Detect fails, select the current phase to prevent the bot from penalizing future documents."
+    )
+
     st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
     st.markdown('<div class="mint-section-label">Data Source</div>', unsafe_allow_html=True)
 
@@ -712,6 +732,7 @@ with st.sidebar:
 
     target_zip_for_audit = None
     drive_ready = False
+    target_folder_name = "Unknown"
 
     st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
 
@@ -739,6 +760,7 @@ with st.sidebar:
         uploaded_file = st.file_uploader("Upload ZIP Archive", type="zip")
         if uploaded_file:
             target_zip_for_audit = uploaded_file
+            target_folder_name = uploaded_file.name
             st.markdown(f'<div style="font-size:0.78rem; color:#4ADE80; padding:6px 0;">✓ {uploaded_file.name}</div>', unsafe_allow_html=True)
 
     # ── Google Drive ──
@@ -773,6 +795,7 @@ with st.sidebar:
                     target_options[sf["name"]] = sf
 
                 target_folder = target_options[st.selectbox("Target Folder", list(target_options.keys()))]
+                target_folder_name = target_folder["name"] # Save the folder name for MINT SS checking
 
                 if st.button("Extract Files", use_container_width=True):
                     if company:
@@ -797,7 +820,7 @@ with st.sidebar:
         st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
         st.markdown('<hr style="border-color:rgba(99,179,237,0.08);">', unsafe_allow_html=True)
 
-        if st.button("Run Adherence Audit", type="primary", use_container_width=True):
+        if st.button("Run Compliance Audit", type="primary", use_container_width=True):
             if not company:
                 st.error("Company name is required.")
             elif data_source == "Local ZIP Upload" and not target_zip_for_audit:
@@ -805,7 +828,7 @@ with st.sidebar:
             elif data_source == "Google Drive" and not drive_ready and not os.path.exists(f"downloads/{company}"):
                 st.error("Please extract files from Drive first.")
             else:
-                with st.status("Running Adherence audit...", expanded=True) as status_box:
+                with st.status("Running compliance audit...", expanded=True) as status_box:
                     progress_bar = st.progress(0, text="Initializing...")
 
                     def file_logger(msg):
@@ -825,15 +848,21 @@ with st.sidebar:
                             shutil.rmtree(target_dir)
                         os.makedirs(target_dir, exist_ok=True)
                         
-                        # Reset file pointer before extracting to prevent BadZipFile error
                         target_zip_for_audit.seek(0)
                         with zipfile.ZipFile(target_zip_for_audit, "r") as zip_ref:
                             zip_ref.extractall(target_dir)
 
+                    # --- PASSING NEW ARGUMENTS TO PIPELINE ---
+                    # We pass 'forced_phase' and 'folder_name' so pipeline.py can use them
+                    pass_phase = None if forced_phase == "Auto-Detect" else forced_phase
+                    
                     results = run_pipeline(
-                        company, project_type,
+                        company, 
+                        project_type,
                         log_callback=file_logger,
-                        progress_callback=ui_progress
+                        progress_callback=ui_progress,
+                        forced_phase=pass_phase,
+                        folder_name=target_folder_name
                     )
                     save_audit_history(company, results)
                     status_box.update(label="Audit complete.", state="complete", expanded=False)
@@ -873,7 +902,7 @@ if st.session_state.audit_results is None:
             line-height: 1.1;
             margin-bottom: 16px;
         ">
-            Adherence Intelligence<br>
+            Compliance Intelligence<br>
             <span style="color: #3B82F6;">at Executive Grade</span>
         </div>
         <div style="
@@ -960,7 +989,7 @@ else:
         margin-bottom: 32px;
     ">
         <div style="font-size:0.72rem; font-weight:600; letter-spacing:0.15em; color:#3B82F6; text-transform:uppercase; margin-bottom:6px;">
-            Adherence Intelligence Report
+            Compliance Intelligence Report
         </div>
         <div style="
             font-size: 2rem;
@@ -1088,7 +1117,7 @@ else:
             ">
                 <div style="font-size:1.4rem; margin-bottom:8px;">✓</div>
                 <div style="font-size:0.88rem; color:#4ADE80; font-weight:600;">All documents verified</div>
-                <div style="font-size:0.78rem; color:#475569; margin-top:4px;">No Adherence gaps detected.</div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:4px;">No compliance gaps detected.</div>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -1103,14 +1132,12 @@ else:
                         ai_comment = d.get("comment", ai_comment)
                         break
                 
-                # Strip newlines to prevent Streamlit from breaking the HTML block
                 clean_phase = str(phase).strip()
                 clean_comment = str(ai_comment).replace('\n', ' ').strip()
                 truncated = (clean_comment[:90] + "…") if len(clean_comment) > 90 else clean_comment
                 
                 found_html = f'&nbsp;·&nbsp; Found in: <span style="color:#FACC15;">{actual_folder}</span>' if wrong_folder else ''
                 
-                # Tightly packed HTML string
                 html_str = f"""
                 <div class="gap-item {severity_class}">
                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">
@@ -1180,7 +1207,6 @@ else:
         """, unsafe_allow_html=True)
         pdf_path = generate_pdf(comp, results)
         
-        # Read as bytes to avoid context manager closure error in Streamlit
         with open(pdf_path, "rb") as f:
             pdf_bytes = f.read()
             
@@ -1196,7 +1222,7 @@ else:
         st.markdown("""
         <div class="export-card">
             <div class="export-card-title">Ledger CSV Export</div>
-            <div class="export-card-desc">Machine-readable Adherence ledger for integration with your data warehouse or project tracking systems.</div>
+            <div class="export-card-desc">Machine-readable compliance ledger for integration with your data warehouse or project tracking systems.</div>
         </div>
         """, unsafe_allow_html=True)
         if not df_ledger.empty:
