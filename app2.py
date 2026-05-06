@@ -410,7 +410,7 @@ class ExecutivePDF(FPDF):
     def footer(self):
         if self.is_cover: return
         
-        self.set_y(-15)
+        self.set_y(-20)
         self.set_font("Arial", "I", 8)
         self.set_text_color(148, 163, 184)
         self.set_draw_color(226, 232, 240)
@@ -490,7 +490,7 @@ def generate_pdf(company, results):
     pdf.rect(0, 0, 210, 297, 'F') 
     
     current_y = 80
-    my_logo_path = "my_logo.png" 
+    my_logo_path = "logo.png" 
     
     if os.path.exists(my_logo_path):
         try:
@@ -502,7 +502,7 @@ def generate_pdf(company, results):
     pdf.set_y(current_y)
     pdf.set_font("Arial", "B", 14)
     pdf.set_text_color(59, 130, 246)
-    pdf.cell(0, 10, "M I N T .", align='C', ln=True)
+    pdf.cell(0, 10, "M I N T", align='C', ln=True)
     
     pdf.set_font("Arial", "B", 26)
     pdf.set_text_color(241, 245, 249)
@@ -697,7 +697,7 @@ def generate_pdf(company, results):
 with st.sidebar:
     st.markdown("""
     <div style="padding: 24px 0 20px 0; border-bottom: 1px solid rgba(99,179,237,0.1); margin-bottom: 24px;">
-        <div class="sidebar-logo">◈ MINT<span>.</span></div>
+        <div class="sidebar-logo">MINT</div>
         <div style="font-size:0.72rem; color:#475569; margin-top:4px; letter-spacing:0.06em; text-transform:uppercase;">
             Compliance Intelligence Platform
         </div>
@@ -903,7 +903,7 @@ if st.session_state.audit_results is None:
             margin-bottom: 16px;
         ">
             Compliance Intelligence<br>
-            <span style="color: #3B82F6;">at Executive Grade</span>
+            <span style="color: #3B82F6;">Dashboard</span>
         </div>
         <div style="
             font-size: 1rem;
