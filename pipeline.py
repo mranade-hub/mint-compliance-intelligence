@@ -48,64 +48,96 @@ def detect_template_heuristics(pdf_path, company_name):
     except Exception:
         return False
 
-def extract_signature_image(pdf_path, doc_name):
-    """Enhanced signature extraction using weighted keyword scoring and large-image detection."""
-    if not HAS_FITZ or not pdf_path.lower().endswith(".pdf"): 
-        return None
-        
+# ─────────────────────────────────────────────
+#  FIX 1 + FIX 6: extract ALL signature pages,
+#  save to a persistent path (not temp_signatures)
+# ─────────────────────────────────────────────
+def extract_signature_images(pdf_path, doc_name, company="shared"):
+    """
+    Scans every page of the PDF. Returns a list of PNG paths — one full-page
+    screenshot per page that contains signature-related content.
+
+    Changes from the old single-path version:
+      - Returns a LIST instead of a single path string.
+      - Captures ALL pages above the score threshold, not just the best one.
+      - Saves to audit_history/signatures/<company>/ so images survive across sessions.
+      - Falls back to the last page if no keyword match is found.
+    """
+    if not HAS_FITZ or not pdf_path.lower().endswith(".pdf"):
+        return []
+
     try:
         doc = fitz.open(pdf_path)
-        best_page = -1
-        max_score = 0
-        
-        # Heavy weight for TraceLink's specific e-signature format
+
+        # Weighted keyword scoring — same logic as before
         sig_keywords = {
-            "electronically signed by:": 20, 
-            "docusign": 10, "digitally signed": 10, 
-            "signature:": 5, "approved by": 5, "sign here": 5,
-            "signed by": 4, "date:": 1, "title:": 1
+            "electronically signed by:": 20,
+            "docusign": 10,
+            "digitally signed": 10,
+            "signature:": 5,
+            "approved by": 5,
+            "sign here": 5,
+            "signed by": 4,
+            "date:": 1,
+            "title:": 1,
         }
-        
+
+        # FIX 6: persistent folder so loaded-from-JSON audits still find the images
+        sig_dir = os.path.join("audit_history", "signatures", re.sub(r'[^a-zA-Z0-9_-]', '_', company))
+        os.makedirs(sig_dir, exist_ok=True)
+
+        clean_name = re.sub(r'[^a-zA-Z0-9]', '_', doc_name)
+        SCORE_THRESHOLD = 4  # Capture any page scoring above this
+
+        captured_paths = []
+        page_scores = []
+
         for i in range(len(doc)):
             text = doc[i].get_text().lower()
-            score = 0
-            for kw, weight in sig_keywords.items():
-                if kw in text:
-                    score += weight * text.count(kw)
-                    
-            if score > max_score:
-                max_score = score
-                best_page = i
-                
-        if best_page == -1:
-            # Fallback 1: Look for graphical elements, but IGNORE tiny checkboxes
-            for i in range(max(0, len(doc) - 3), len(doc)):
+            score = sum(
+                weight * text.count(kw)
+                for kw, weight in sig_keywords.items()
+                if kw in text
+            )
+            page_scores.append((i, score))
+
+        # FIX 1: capture every qualifying page, not just the best one
+        qualifying_pages = [
+            (idx, sc) for idx, sc in page_scores if sc >= SCORE_THRESHOLD
+        ]
+
+        for idx, _ in qualifying_pages:
+            page = doc[idx]
+            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+            out_path = os.path.join(sig_dir, f"{clean_name}_page{idx + 1}.png")
+            pix.save(out_path)
+            captured_paths.append(out_path)
+
+        # Fallback: if no keyword match found, grab the very last page
+        if not captured_paths:
+            last_idx = len(doc) - 1
+
+            # Also check last 3 pages for graphical elements (embedded signature images)
+            fallback_idx = last_idx
+            for i in range(max(0, last_idx - 2), last_idx + 1):
                 images = doc[i].get_images()
                 for img in images:
-                    # img[2] is width, img[3] is height in fitz
-                    if img[2] > 50 and img[3] > 20: 
-                        best_page = i
+                    if img[2] > 50 and img[3] > 20:   # width > 50px, height > 20px
+                        fallback_idx = i
                         break
-                if best_page != -1:
-                    break
-        
-        if best_page == -1:
-            best_page = len(doc) - 1 # Fallback 2: The very last page
-            
-        page = doc[best_page]
-        
-        pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
-        os.makedirs("temp_signatures", exist_ok=True)
-        
-        clean_name = re.sub(r'[^a-zA-Z0-9]', '_', doc_name)
-        out_path = f"temp_signatures/{clean_name}_sig.png"
-        pix.save(out_path)
-        
+
+            page = doc[fallback_idx]
+            pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
+            out_path = os.path.join(sig_dir, f"{clean_name}_last_page.png")
+            pix.save(out_path)
+            captured_paths.append(out_path)
+
         doc.close()
-        return out_path
+        return captured_paths
+
     except Exception as e:
-        print(f"Error extracting signature for {doc_name}: {e}")
-        return None
+        print(f"[SIGNATURE] Error extracting pages for '{doc_name}': {e}")
+        return []
 
 
 def run_pipeline(company, project_type, log_callback=None, progress_callback=None, forced_phase=None, folder_name="Unknown"):
@@ -153,6 +185,20 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
         checklist_logs = []
         missing_critical_docs = []
 
+        # ─────────────────────────────────────────────
+        #  FIX 4: corrected sig_required_docs
+        #    - Fixed typo:  "servicesow" → "servicessow"
+        #      (normalize_str("Services - SOW") = "servicessow")
+        #    - Removed "hld" and "configspec" — not present in COMPLIANCE_MATRIX
+        # ─────────────────────────────────────────────
+        sig_required_docs = [
+            "designdocfullyexecuted",       # Design Doc fully executed
+            "servicessow",                  # Services - SOW  (was "servicesow" — typo fix)
+            "ird",                          # IRD
+            "internaltransitiondocument",   # Internal Transition Document
+            "mintprojectcompletionform",    # MINT Project Completion Form
+        ]
+
         for phase in working_phases:
             phase_docs_dict = COMPLIANCE_MATRIX.get(phase, {})
             phase_results = []
@@ -178,7 +224,8 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
                             "document": doc, "quality": {}, "score": 100, "pass": True,
                             "wrong_folder": False, "actual_folder": "N/A", "expected_phase": phase,
                             "comment": "N/A: Optional Requirement.",
-                            "signature_image_path": None
+                            # FIX 2: use list instead of single path
+                            "signature_image_paths": []
                         })
                         checklist_logs.append(f"[CHECKLIST] {doc} ➖ Bypassed (Optional)")
                     else:
@@ -186,7 +233,8 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
                             "document": doc, "quality": {}, "score": 0, "pass": False,
                             "wrong_folder": False, "actual_folder": "N/A", "expected_phase": phase,
                             "comment": "Missing: No document submitted for this requirement.",
-                            "signature_image_path": None
+                            # FIX 2: use list instead of single path
+                            "signature_image_paths": []
                         })
                         missing_critical_docs.append(doc)
                         checklist_logs.append(f"[CHECKLIST] {doc} ❌ Missing")
@@ -225,21 +273,31 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
                         wrong_folder = True
 
                 comment = best_quality.get("short_summary", "")
-                signature_image_path = None
-                
-                sig_required_docs = ["designdocfullyexecuted", "hld", "configspec", "ird", "internaltransitiondocument", "mintprojectcompletionform", "servicesow"]
+
+                # ─────────────────────────────────────────────
+                #  FIX 2 + FIX 3: signature_image_paths is now
+                #  a LIST. Extraction runs regardless of score
+                #  (removed the best_score < 70 gate).
+                # ─────────────────────────────────────────────
+                signature_image_paths = []
+
                 if normalize_str(doc) in sig_required_docs:
                     if is_template:
                         comment = "⚠️ Blank Template Detected. Signatures missing. " + comment
                     elif best_score < 70:
-                        comment = "⚠️ Document incomplete (Signatures likely missing). " + comment
-                    elif file_path and file_path.lower().endswith(".pdf"):
-                        signature_image_path = extract_signature_image(file_path, doc)
-                        if signature_image_path:
-                            comment += " [System: Signature proof extracted successfully]."
+                        # FIX 3: still flag the comment but DO attempt extraction
+                        comment = "⚠️ Document incomplete (Signatures may be missing). " + comment
+
+                    # FIX 3: extraction is now OUTSIDE the score gate — always runs for PDFs
+                    if file_path and file_path.lower().endswith(".pdf"):
+                        signature_image_paths = extract_signature_images(file_path, doc, company)
+                        if signature_image_paths:
+                            comment += f" [System: {len(signature_image_paths)} signature page(s) captured]."
                         elif not HAS_FITZ:
-                            comment += " [System Note: PyMuPDF not installed, couldn't extract signature image]."
-                
+                            comment += " [System Note: PyMuPDF not installed — signature page images skipped]."
+                        else:
+                            comment += " [System Note: No signature pages detected in PDF]."
+
                 if is_template:
                     comment = f"⚠️ Blank Template Detected. " + comment
                 elif wrong_folder:
@@ -256,7 +314,8 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
                     "document": doc, "quality": best_quality, "score": max(0, best_score),
                     "pass": best_score >= 70, "wrong_folder": wrong_folder,
                     "actual_folder": actual_folder, "expected_phase": phase, "comment": comment,
-                    "signature_image_path": signature_image_path
+                    # FIX 2: list of paths, one per captured signature page
+                    "signature_image_paths": signature_image_paths
                 })
 
             avg_score = round(sum(d["score"] for d in phase_results) / len(phase_results), 2) if phase_results else 0

@@ -656,34 +656,80 @@ def generate_pdf(company, results):
             row_idx += 1
 
     # --- 5. SIGNATURE CAPTURES ---
-    # Check if any document contains a signature image path returned from the pipeline
-    has_signatures = any(d.get("signature_image_path") for phase, info in results.get("phases", {}).items() for d in info.get("documents", []))
-    
+    # FIX 7: use signature_image_paths (list) instead of the old singular signature_image_path.
+    # Supports multiple captured pages per document and handles both old (str) and new (list) formats
+    # so that previously-saved audit JSONs continue to work.
+
+    def _get_sig_paths(doc_dict):
+        """Normalise old single-path format and new list format into a list."""
+        paths = doc_dict.get("signature_image_paths", [])
+        if paths:
+            return paths if isinstance(paths, list) else [paths]
+        # Backward-compat: old audits saved "signature_image_path" as a string
+        legacy = doc_dict.get("signature_image_path")
+        if legacy:
+            return [legacy] if isinstance(legacy, str) else []
+        return []
+
+    # FIX 7: check the new list key (with backward-compat fallback)
+    has_signatures = any(
+        _get_sig_paths(d)
+        for _, info in results.get("phases", {}).items()
+        for d in info.get("documents", [])
+    )
+
     if has_signatures:
         pdf.add_page()
         pdf.set_text_color(15, 23, 42)
         pdf.set_font("Arial", "B", 14)
         pdf.cell(0, 8, "Signature Verification Captures", ln=True)
         pdf.ln(4)
-        
+
         for phase, info in results.get("phases", {}).items():
             for d in info.get("documents", []):
-                sig_path = d.get("signature_image_path")
-                if sig_path and os.path.exists(sig_path):
-                    if pdf.get_y() > 220:  # Prevent images from breaking across pages badly
+                sig_paths = _get_sig_paths(d)
+                valid_paths = [p for p in sig_paths if p and os.path.exists(p)]
+
+                if not valid_paths:
+                    continue
+
+                # Document header — printed once per document, before its page images
+                pdf.set_font("Arial", "B", 10)
+                pdf.set_text_color(37, 99, 235)
+                doc_label = f"Document: {clean_text(d.get('document', 'Unknown'))}  |  Phase: {phase}"
+                pdf.cell(0, 7, doc_label, ln=True)
+
+                pdf.set_draw_color(37, 99, 235)
+                pdf.set_line_width(0.4)
+                pdf.line(15, pdf.get_y(), 195, pdf.get_y())
+                pdf.ln(3)
+
+                # FIX 7: iterate over every captured page image
+                for img_idx, sig_path in enumerate(valid_paths):
+                    # Always start a new page when near the bottom so the image isn't clipped
+                    if pdf.get_y() > 210:
                         pdf.add_page()
-                        
-                    pdf.set_font("Arial", "B", 10)
-                    pdf.set_text_color(71, 85, 105)
-                    pdf.cell(0, 6, f"Document: {clean_text(d.get('document', 'Unknown'))} ({phase} Phase)", ln=True)
-                    
+
+                    # Sub-label per page (only shown when multiple pages captured)
+                    if len(valid_paths) > 1:
+                        pdf.set_font("Arial", "I", 8)
+                        pdf.set_text_color(100, 116, 139)
+                        pdf.cell(0, 5, f"Signature Page {img_idx + 1} of {len(valid_paths)}", ln=True)
+
                     try:
-                        # Renders the signature image, capped at 180mm width
+                        # Full-page image, 180 mm wide — matches printable width
                         pdf.image(sig_path, x=15, w=180)
-                        pdf.ln(8) 
+                        pdf.ln(6)
                     except Exception as e:
+                        pdf.set_font("Arial", "", 9)
                         pdf.set_text_color(239, 68, 68)
-                        pdf.cell(0, 6, f"[Error loading signature image for {clean_text(d.get('document', 'Unknown'))}]", ln=True)
+                        pdf.cell(
+                            0, 6,
+                            f"[Image load error — page {img_idx + 1}: {clean_text(str(e))}]",
+                            ln=True
+                        )
+
+                pdf.ln(4)  # breathing room between documents
 
     os.makedirs("results", exist_ok=True)
     file_path = f"results/{clean_text(company)}_Adherence_Report.pdf"
