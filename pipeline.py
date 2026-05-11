@@ -3,7 +3,7 @@ import json
 import re
 import shutil
 
-# Safely import PyMuPDF for signature image extraction
+# Safely import PyMuPDF for signature image extraction and template heuristic reading
 try:
     import fitz  # PyMuPDF
     HAS_FITZ = True
@@ -20,31 +20,81 @@ def normalize_str(s):
     if not s: return ""
     return re.sub(r'[^a-z0-9]', '', str(s).lower())
 
+def detect_template_heuristics(pdf_path, company_name):
+    """Returns True if the document heavily looks like a blank, unpopulated template."""
+    if not HAS_FITZ or not pdf_path.lower().endswith(".pdf"):
+        return False
+    
+    try:
+        doc = fitz.open(pdf_path)
+        text = ""
+        # Check up to the first 10 pages for speed
+        for i in range(min(10, len(doc))):
+            text += doc[i].get_text().lower() + " "
+        doc.close()
+        
+        comp_normalized = company_name.lower().split()[0]
+        has_company = comp_normalized in text
+        
+        placeholders = len(re.findall(r'\[.*?\]|<.*?>|insert \w+ here', text))
+        
+        template_phrases = ["company name", "customer name", "partner name", "yyyymmdd"]
+        has_template_phrase = any(p in text for p in template_phrases)
+
+        if not has_company and (placeholders > 4 or has_template_phrase):
+            return True
+            
+        return False
+    except Exception:
+        return False
+
 def extract_signature_image(pdf_path, doc_name):
-    """Helper function to find and extract the signature page as an image."""
-    if not HAS_FITZ: 
+    """Enhanced signature extraction using weighted keyword scoring and large-image detection."""
+    if not HAS_FITZ or not pdf_path.lower().endswith(".pdf"): 
         return None
         
     try:
         doc = fitz.open(pdf_path)
-        sig_page_num = -1
+        best_page = -1
+        max_score = 0
         
-        # Look for signature keywords in the last 5 pages
-        search_range = range(max(0, len(doc) - 5), len(doc))
-        for i in search_range:
+        # Heavy weight for TraceLink's specific e-signature format
+        sig_keywords = {
+            "electronically signed by:": 20, 
+            "docusign": 10, "digitally signed": 10, 
+            "signature:": 5, "approved by": 5, "sign here": 5,
+            "signed by": 4, "date:": 1, "title:": 1
+        }
+        
+        for i in range(len(doc)):
             text = doc[i].get_text().lower()
-            if any(kw in text for kw in ["signature", "signed", "approved by", "approval", "date:"]):
-                sig_page_num = i
-                break
+            score = 0
+            for kw, weight in sig_keywords.items():
+                if kw in text:
+                    score += weight * text.count(kw)
+                    
+            if score > max_score:
+                max_score = score
+                best_page = i
                 
-        # Fallback to the very last page if no keywords are found
-        if sig_page_num == -1:
-            sig_page_num = len(doc) - 1 
-            
-        page = doc[sig_page_num]
+        if best_page == -1:
+            # Fallback 1: Look for graphical elements, but IGNORE tiny checkboxes
+            for i in range(max(0, len(doc) - 3), len(doc)):
+                images = doc[i].get_images()
+                for img in images:
+                    # img[2] is width, img[3] is height in fitz
+                    if img[2] > 50 and img[3] > 20: 
+                        best_page = i
+                        break
+                if best_page != -1:
+                    break
         
-        # Render the page to a high-res image
-        pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5))
+        if best_page == -1:
+            best_page = len(doc) - 1 # Fallback 2: The very last page
+            
+        page = doc[best_page]
+        
+        pix = page.get_pixmap(matrix=fitz.Matrix(2.0, 2.0))
         os.makedirs("temp_signatures", exist_ok=True)
         
         clean_name = re.sub(r'[^a-zA-Z0-9]', '_', doc_name)
@@ -80,8 +130,8 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
             log_callback=log_callback, progress_callback=progress_callback
         )
 
-        if log_callback: log_callback("[SYSTEM] Deep audit complete. Calculating final maturity scores...")
-        if progress_callback: progress_callback(1, 1, "Generating Executive Report...")
+        if log_callback: log_callback("[SYSTEM] Deep audit complete. Initializing Backend Verification Checklist...")
+        if progress_callback: progress_callback(1, 1, "Reconciling Checklist & Generating Report...")
 
         from collections import defaultdict
         compliance_map = defaultdict(list)
@@ -94,12 +144,14 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
 
         final = {}
         
-        # --- UPDATE 1: FORCE PHASE FILTERING ---
         working_phases = PHASE_ORDER
         if forced_phase and forced_phase in PHASE_ORDER:
             allowed_index = PHASE_ORDER.index(forced_phase)
             working_phases = PHASE_ORDER[:allowed_index + 1]
             if log_callback: log_callback(f"[SYSTEM] Forcing audit scope to stop at phase: {forced_phase}")
+
+        checklist_logs = []
+        missing_critical_docs = []
 
         for phase in working_phases:
             phase_docs_dict = COMPLIANCE_MATRIX.get(phase, {})
@@ -107,23 +159,37 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
 
             for doc, allowed_types in phase_docs_dict.items():
                 
-                # --- UPDATE 2: MINT SS EXCEPTION FOR IRD ---
+                # MINT SS EXCEPTION FOR IRD
                 if "MINT SS" in folder_name.upper() and normalize_str(doc) == normalize_str("IRD"):
                     if log_callback: log_callback(f"[SYSTEM] MINT SS Project detected. Bypassing IRD requirement.")
                     continue
                     
                 if project_type not in allowed_types:
                     continue
+                    
+                # OPTIONAL/CONDITIONAL CHECK
+                is_optional = "optional" in doc.lower() or "conditional" in doc.lower()
 
                 qualities = compliance_map.get(normalize_str(doc), [])
 
                 if not qualities:
-                    phase_results.append({
-                        "document": doc, "quality": {}, "score": 0, "pass": False,
-                        "wrong_folder": False, "actual_folder": "N/A", "expected_phase": phase,
-                        "comment": "Missing: No document submitted for this requirement.",
-                        "signature_image_path": None
-                    })
+                    if is_optional:
+                        phase_results.append({
+                            "document": doc, "quality": {}, "score": 100, "pass": True,
+                            "wrong_folder": False, "actual_folder": "N/A", "expected_phase": phase,
+                            "comment": "N/A: Optional Requirement.",
+                            "signature_image_path": None
+                        })
+                        checklist_logs.append(f"[CHECKLIST] {doc} ➖ Bypassed (Optional)")
+                    else:
+                        phase_results.append({
+                            "document": doc, "quality": {}, "score": 0, "pass": False,
+                            "wrong_folder": False, "actual_folder": "N/A", "expected_phase": phase,
+                            "comment": "Missing: No document submitted for this requirement.",
+                            "signature_image_path": None
+                        })
+                        missing_critical_docs.append(doc)
+                        checklist_logs.append(f"[CHECKLIST] {doc} ❌ Missing")
                     continue
 
                 best_score, best_quality = -1, None
@@ -142,6 +208,13 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
                 wrong_folder = False
                 actual_folder = "N/A"
                 
+                is_template = False
+                if file_path:
+                    is_template = detect_template_heuristics(file_path, company)
+                    if is_template:
+                        best_score = min(best_score, 40)
+                        best_quality["appears_template_only"] = True
+
                 if file_path:
                     actual_folder = os.path.basename(os.path.dirname(file_path))
                     if actual_folder.lower() == company.lower():
@@ -154,20 +227,30 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
                 comment = best_quality.get("short_summary", "")
                 signature_image_path = None
                 
-                # --- UPDATE 3: SIGNATURE EXTRACTION FOR CORE DOCS ---
-                sig_required_docs = ["designdocfullyexecuted", "hld", "configspec", "ird"]
+                sig_required_docs = ["designdocfullyexecuted", "hld", "configspec", "ird", "internaltransitiondocument", "mintprojectcompletionform", "servicesow"]
                 if normalize_str(doc) in sig_required_docs:
-                    if best_score < 70:
+                    if is_template:
+                        comment = "⚠️ Blank Template Detected. Signatures missing. " + comment
+                    elif best_score < 70:
                         comment = "⚠️ Document incomplete (Signatures likely missing). " + comment
                     elif file_path and file_path.lower().endswith(".pdf"):
                         signature_image_path = extract_signature_image(file_path, doc)
-                        if not signature_image_path and not HAS_FITZ:
+                        if signature_image_path:
+                            comment += " [System: Signature proof extracted successfully]."
+                        elif not HAS_FITZ:
                             comment += " [System Note: PyMuPDF not installed, couldn't extract signature image]."
                 
-                if wrong_folder:
+                if is_template:
+                    comment = f"⚠️ Blank Template Detected. " + comment
+                elif wrong_folder:
                     comment = f"⚠️ Wrong Folder ({actual_folder}). " + comment
                 elif not comment:
                     comment = "Complete and adherent." if best_score >= 70 else "Incomplete or template-based."
+
+                if best_score >= 70:
+                    checklist_logs.append(f"[CHECKLIST] {doc} ✅ Passed ({best_score}%)")
+                else:
+                    checklist_logs.append(f"[CHECKLIST] {doc} ⚠️ Failed ({best_score}%)")
 
                 phase_results.append({
                     "document": doc, "quality": best_quality, "score": max(0, best_score),
@@ -179,26 +262,31 @@ def run_pipeline(company, project_type, log_callback=None, progress_callback=Non
             avg_score = round(sum(d["score"] for d in phase_results) / len(phase_results), 2) if phase_results else 0
             final[phase] = {"documents": phase_results, "score": avg_score}
 
-        # --- SMART PHASE DETECTION & SCORING LOGIC ---
+        if log_callback:
+            log_callback("--- INTERNAL VERIFICATION CHECKLIST ---")
+            for clog in checklist_logs:
+                log_callback(clog)
+            if missing_critical_docs:
+                log_callback(f"[CHECKLIST WARNING] {len(missing_critical_docs)} critical documents completely missing.")
+            log_callback("---------------------------------------")
+
         if forced_phase and forced_phase in PHASE_ORDER:
             detected_phase = forced_phase
         else:
             detected_phase = working_phases[0]
             for phase in working_phases:
-                has_real_docs = any(d["score"] >= 50 for d in final[phase]["documents"])
+                has_real_docs = any(d["score"] >= 70 for d in final[phase]["documents"])
                 if has_real_docs: 
                     detected_phase = phase
 
         detected_index = PHASE_ORDER.index(detected_phase)
         active_phases = PHASE_ORDER[:detected_index + 1]
         
-        # Calculate overall score ONLY based on active/forced phases
         valid_phase_scores = [final[p]["score"] for p in active_phases if p in final]
         overall_score = round(sum(valid_phase_scores) / len(valid_phase_scores), 2) if valid_phase_scores else 0
 
         risk = "🟢 Low Risk" if overall_score >= 85 else "🟡 Moderate Risk" if overall_score >= 70 else "🟠 High Risk" if overall_score >= 50 else "🔴 Critical Risk"
         
-        # Updated Terminology
         executive_summary = f"Project assessed at {detected_phase} phase with {overall_score}% adherence. Classified as {risk}."
 
         return {
