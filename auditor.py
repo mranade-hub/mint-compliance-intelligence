@@ -1,8 +1,7 @@
 import os
 import re
 import json
-from compliance_matrix import COMPLIANCE_MATRIX
-
+from compliance_matrix import ALL_MATRICES
 
 def safe_json_extract(text):
     if not text: return None
@@ -48,13 +47,16 @@ def map_full_paths(parsed_data, original_batch):
             
     return parsed_data
 
-def ai_deep_audit_batch(phase, file_paths, wolfgang, log_callback=None, progress_callback=None):
+def ai_deep_audit_batch(phase, file_paths, wolfgang, project_category="MINT", log_callback=None, progress_callback=None):
     if not file_paths: return []
 
-    VALID_DOCS = []
+    # FIX: Dynamically fetch ONLY the documents for the selected category
+    COMPLIANCE_MATRIX = ALL_MATRICES.get(project_category, ALL_MATRICES.get("MINT", {}))
+    
+    VALID_DOCS = set()
     for p, docs in COMPLIANCE_MATRIX.items():
         for doc_name in docs.keys():
-            VALID_DOCS.append(doc_name)
+            VALID_DOCS.add(doc_name)
     
     valid_docs_formatted = "\n".join(f"- {d}" for d in VALID_DOCS)
 

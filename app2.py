@@ -15,7 +15,6 @@ import pandas as pd
 import plotly.graph_objects as go
 from fpdf import FPDF
 
-# Ensure your run_pipeline function is updated to accept the new arguments!
 from pipeline import run_pipeline
 from drive_utils import get_drive_service, search_folders_by_name, get_subfolders, download_folder_recursively
 from logger_utils import append_log
@@ -371,7 +370,7 @@ def top_gaps(results):
     gaps = []
     for phase, info in results.get("phases", {}).items():
         for d in info.get("documents", []):
-            if not d.get("pass"):
+            if not d.get("pass") and "N/A" not in d.get("comment", ""):
                 gaps.append((phase, d["document"], d.get("score", 0), False, d.get("actual_folder", "N/A")))
             elif d.get("wrong_folder"):
                 gaps.append((phase, d["document"], d.get("score", 0), True, d.get("actual_folder", "N/A")))
@@ -382,9 +381,10 @@ def top_gaps(results):
 #  PDF GENERATION
 # ─────────────────────────────────────────────
 class ExecutivePDF(FPDF):
-    def __init__(self, company):
+    def __init__(self, company, category_name="MINT"):
         super().__init__()
         self.company = clean_text(company)
+        self.category_name = category_name
         self.timestamp = datetime.datetime.now().strftime("%B %d, %Y - %H:%M")
         self.set_margins(15, 15, 15)
         self.is_cover = True  
@@ -404,7 +404,7 @@ class ExecutivePDF(FPDF):
         self.cell(0, 8, "COMPLIANCE INTELLIGENCE BRIEF", ln=True, align='L')
         self.set_font("Arial", "", 9)
         self.set_text_color(148, 163, 184)
-        self.cell(0, 5, f"Automated Adherence Report for {self.company}", ln=True, align='L')
+        self.cell(0, 5, f"Automated {self.category_name} Adherence Report for {self.company}", ln=True, align='L')
         self.set_y(42)
 
     def footer(self):
@@ -482,7 +482,8 @@ def draw_table_row(pdf, data, widths, line_height=6, fill_color=None, text_color
     pdf.set_xy(15, y + row_h)
 
 def generate_pdf(company, results):
-    pdf = ExecutivePDF(company)
+    cat_name = results.get("project_category", "MINT")
+    pdf = ExecutivePDF(company, cat_name)
     
     # --- 1. COVER PAGE ---
     pdf.add_page()
@@ -506,7 +507,7 @@ def generate_pdf(company, results):
     
     pdf.set_font("Arial", "B", 26)
     pdf.set_text_color(241, 245, 249)
-    pdf.cell(0, 14, "Executive Adherence Report", align='C', ln=True)
+    pdf.cell(0, 14, f"Executive Adherence Report ({cat_name})", align='C', ln=True)
     
     pdf.set_fill_color(37, 99, 235)
     pdf.rect(85, pdf.get_y() + 4, 40, 2, 'F') 
@@ -640,7 +641,9 @@ def generate_pdf(company, results):
     row_idx = 0
     for phase, info in results.get("phases", {}).items():
         for d in info.get("documents", []):
-            if not d.get("actual_folder") or d.get("actual_folder") == "N/A":
+            if "N/A:" in d.get("comment", ""):
+                loc_status, status_color = "PASS (Optional)", (100, 116, 139)
+            elif not d.get("actual_folder") or d.get("actual_folder") == "N/A":
                 loc_status, status_color = "Missing", (239, 68, 68)
             elif d.get("wrong_folder"):
                 loc_status, status_color = f"{'PASS' if d['pass'] else 'FAIL'} - Misplaced", (245, 158, 11)
@@ -656,83 +659,35 @@ def generate_pdf(company, results):
             row_idx += 1
 
     # --- 5. SIGNATURE CAPTURES ---
-    # FIX 7: use signature_image_paths (list) instead of the old singular signature_image_path.
-    # Supports multiple captured pages per document and handles both old (str) and new (list) formats
-    # so that previously-saved audit JSONs continue to work.
-
-    def _get_sig_paths(doc_dict):
-        """Normalise old single-path format and new list format into a list."""
-        paths = doc_dict.get("signature_image_paths", [])
-        if paths:
-            return paths if isinstance(paths, list) else [paths]
-        # Backward-compat: old audits saved "signature_image_path" as a string
-        legacy = doc_dict.get("signature_image_path")
-        if legacy:
-            return [legacy] if isinstance(legacy, str) else []
-        return []
-
-    # FIX 7: check the new list key (with backward-compat fallback)
-    has_signatures = any(
-        _get_sig_paths(d)
-        for _, info in results.get("phases", {}).items()
-        for d in info.get("documents", [])
-    )
-
+    has_signatures = any(d.get("signature_image_path") for phase, info in results.get("phases", {}).items() for d in info.get("documents", []))
+    
     if has_signatures:
         pdf.add_page()
         pdf.set_text_color(15, 23, 42)
         pdf.set_font("Arial", "B", 14)
         pdf.cell(0, 8, "Signature Verification Captures", ln=True)
         pdf.ln(4)
-
+        
         for phase, info in results.get("phases", {}).items():
             for d in info.get("documents", []):
-                sig_paths = _get_sig_paths(d)
-                valid_paths = [p for p in sig_paths if p and os.path.exists(p)]
-
-                if not valid_paths:
-                    continue
-
-                # Document header — printed once per document, before its page images
-                pdf.set_font("Arial", "B", 10)
-                pdf.set_text_color(37, 99, 235)
-                doc_label = f"Document: {clean_text(d.get('document', 'Unknown'))}  |  Phase: {phase}"
-                pdf.cell(0, 7, doc_label, ln=True)
-
-                pdf.set_draw_color(37, 99, 235)
-                pdf.set_line_width(0.4)
-                pdf.line(15, pdf.get_y(), 195, pdf.get_y())
-                pdf.ln(3)
-
-                # FIX 7: iterate over every captured page image
-                for img_idx, sig_path in enumerate(valid_paths):
-                    # Always start a new page when near the bottom so the image isn't clipped
-                    if pdf.get_y() > 210:
+                sig_path = d.get("signature_image_path")
+                if sig_path and os.path.exists(sig_path):
+                    if pdf.get_y() > 220:
                         pdf.add_page()
-
-                    # Sub-label per page (only shown when multiple pages captured)
-                    if len(valid_paths) > 1:
-                        pdf.set_font("Arial", "I", 8)
-                        pdf.set_text_color(100, 116, 139)
-                        pdf.cell(0, 5, f"Signature Page {img_idx + 1} of {len(valid_paths)}", ln=True)
-
+                        
+                    pdf.set_font("Arial", "B", 10)
+                    pdf.set_text_color(71, 85, 105)
+                    pdf.cell(0, 6, f"Document: {clean_text(d.get('document', 'Unknown'))} ({phase} Phase)", ln=True)
+                    
                     try:
-                        # Full-page image, 180 mm wide — matches printable width
                         pdf.image(sig_path, x=15, w=180)
-                        pdf.ln(6)
+                        pdf.ln(8) 
                     except Exception as e:
-                        pdf.set_font("Arial", "", 9)
                         pdf.set_text_color(239, 68, 68)
-                        pdf.cell(
-                            0, 6,
-                            f"[Image load error — page {img_idx + 1}: {clean_text(str(e))}]",
-                            ln=True
-                        )
-
-                pdf.ln(4)  # breathing room between documents
+                        pdf.cell(0, 6, f"[Error loading signature image for {clean_text(d.get('document', 'Unknown'))}]", ln=True)
 
     os.makedirs("results", exist_ok=True)
-    file_path = f"results/{clean_text(company)}_Adherence_Report.pdf"
+    file_path = f"results/{clean_text(company)}_{clean_text(cat_name).replace(' ', '_')}_Adherence_Report.pdf"
     pdf.output(file_path)
     return file_path
 
@@ -754,16 +709,22 @@ with st.sidebar:
     company = st.text_input("Company Name", placeholder="e.g. Acme Corporation", label_visibility="collapsed")
     st.markdown('<div style="font-size:0.72rem; color:#475569; margin-bottom:6px; letter-spacing:0.05em; text-transform:uppercase;">Company Name</div>', unsafe_allow_html=True)
 
+    # --- NEW DROPDOWN FOR PROJECT CATEGORY ---
+    project_category = st.selectbox(
+        "Project Category",
+        ["MINT", "Solution Partner", "Track and Trace"],
+        label_visibility="visible"
+    )
+
     project_type = st.selectbox(
         "Engagement Type",
         ["New Project", "Transitioned Project", "SubContracted Project", "Reseller Project"],
         label_visibility="visible"
     )
 
-    # --- NEW DROPDOWN FOR FORCING PHASE ---
     forced_phase = st.selectbox(
         "Force Project Phase",
-        ["Auto-Detect", "Engage", "Design", "Build", "Execute", "Test", "Hypercare & Project Closure"],
+        ["Auto-Detect", "Engage", "Design", "Build", "Execute", "Test", "Deploy", "Service", "Hypercare & Project Closure"],
         help="If Auto-Detect fails, select the current phase to prevent the bot from penalizing future documents."
     )
 
@@ -841,7 +802,7 @@ with st.sidebar:
                     target_options[sf["name"]] = sf
 
                 target_folder = target_options[st.selectbox("Target Folder", list(target_options.keys()))]
-                target_folder_name = target_folder["name"] # Save the folder name for MINT SS checking
+                target_folder_name = target_folder["name"]
 
                 if st.button("Extract Files", use_container_width=True):
                     if company:
@@ -898,12 +859,11 @@ with st.sidebar:
                         with zipfile.ZipFile(target_zip_for_audit, "r") as zip_ref:
                             zip_ref.extractall(target_dir)
 
-                    # --- PASSING NEW ARGUMENTS TO PIPELINE ---
-                    # We pass 'forced_phase' and 'folder_name' so pipeline.py can use them
                     pass_phase = None if forced_phase == "Auto-Detect" else forced_phase
                     
                     results = run_pipeline(
-                        company, 
+                        company,
+                        project_category,
                         project_type,
                         log_callback=file_logger,
                         progress_callback=ui_progress,
@@ -1009,13 +969,12 @@ else:
     comp    = st.session_state.audit_company
     overall = results.get("overall_score", 0)
     maturity = maturity_level(overall)
+    cat_name = results.get("project_category", "MINT")
 
     total_docs  = sum(len(p.get("documents", [])) for p in results.get("phases", {}).values())
     passed_docs = sum(1 for p in results.get("phases", {}).values() for d in p.get("documents", []) if d.get("pass"))
     pass_rate   = round(passed_docs / total_docs * 100, 1) if total_docs > 0 else 0
-    wrong_count = sum(1 for p in results.get("phases", {}).values() for d in p.get("documents", []) if d.get("wrong_folder"))
 
-    # Benchmark
     current_ts   = results.get("audit_timestamp", "")
     history      = load_company_history(comp)
     older_audits = [h for h in history if h.get("audit_timestamp", "") < current_ts]
@@ -1035,7 +994,7 @@ else:
         margin-bottom: 32px;
     ">
         <div style="font-size:0.72rem; font-weight:600; letter-spacing:0.15em; color:#3B82F6; text-transform:uppercase; margin-bottom:6px;">
-            Compliance Intelligence Report
+            Compliance Intelligence Report ({cat_name})
         </div>
         <div style="
             font-size: 2rem;
@@ -1205,12 +1164,15 @@ else:
     table_data = []
     for phase, info in results.get("phases", {}).items():
         for d in info.get("documents", []):
-            if not d.get("actual_folder") or d.get("actual_folder") == "N/A":
-                loc_status = "Missing"
+            if "N/A:" in d.get("comment", ""):
+                loc_status, status_color = "PASS (Optional)", (100, 116, 139)
+            elif not d.get("actual_folder") or d.get("actual_folder") == "N/A":
+                loc_status, status_color = "Missing", (239, 68, 68)
             elif d.get("wrong_folder"):
-                loc_status = f"Wrong folder ({d.get('actual_folder')})"
+                loc_status, status_color = f"{'PASS' if d['pass'] else 'FAIL'} - Misplaced", (245, 158, 11)
             else:
-                loc_status = "Correct"
+                loc_status = "PASS" if d["pass"] else "FAIL"
+                status_color = (34, 197, 94) if d["pass"] else (239, 68, 68)
 
             table_data.append({
                 "Phase":        phase,
@@ -1259,7 +1221,7 @@ else:
         st.download_button(
             "Download PDF Report",
             data=pdf_bytes,
-            file_name=f"{clean_text(comp)}_Adherence_Report.pdf",
+            file_name=f"{clean_text(comp)}_{clean_text(cat_name).replace(' ', '_')}_Adherence_Report.pdf",
             mime="application/pdf",
             use_container_width=True,
         )
