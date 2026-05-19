@@ -63,6 +63,7 @@ def ai_deep_audit_batch(phase, file_paths, wolfgang, project_category="MINT", lo
     results = []
     total_batches = (len(file_paths) + MAX_FILES - 1) // MAX_FILES
 
+    # Clear chat ONCE at the very beginning to start a fresh audit session
     if hasattr(wolfgang, 'clear_chat'): 
         wolfgang.clear_chat()
 
@@ -130,9 +131,7 @@ Return ONLY a plain text JSON array adding 'qa_pass' (boolean) and 'qa_reason' (
   }}
 ]
 """
-            if hasattr(wolfgang, 'clear_chat'): wolfgang.clear_chat()
-            
-            # Send QA prompt purely as text evaluation (no files needed for metadata check)
+            # Keep QA check in the exact same chat thread
             qa_response = wolfgang.send_prompt(qa_prompt)
             qa_parsed = safe_json_extract(qa_response)
             
@@ -149,10 +148,9 @@ Return ONLY a plain text JSON array adding 'qa_pass' (boolean) and 'qa_reason' (
             if has_errors:
                 if log_callback: log_callback(f"[QA FLAG] AI Misclassifications detected. Forcing Self-Correction loop...")
                 
-                correction_prompt = prompt + f"\n\nCRITICAL QA FEEDBACK: Your previous classification had errors. Review the files again and fix them based on this QA feedback:\n{json.dumps(failed_items)}\n\nReturn the fully corrected JSON array in the exact format requested."
+                correction_prompt = f"CRITICAL QA FEEDBACK: Your previous classification had errors. Review the files again and fix them based on this QA feedback:\n{json.dumps(failed_items)}\n\nReturn the fully corrected JSON array in the exact format originally requested."
                 
-                if hasattr(wolfgang, 'clear_chat'): wolfgang.clear_chat()
-                wolfgang.upload_multiple(batch) # Re-upload files for the correction pass
+                # Send the correction in the same thread. No re-uploading needed.
                 response2 = wolfgang.send_prompt(correction_prompt)
                 parsed2 = safe_json_extract(response2)
                 
@@ -161,7 +159,7 @@ Return ONLY a plain text JSON array adding 'qa_pass' (boolean) and 'qa_reason' (
                     results.extend(parsed2)
                     if log_callback: log_callback(f"[SUCCESS] Batch {batch_idx + 1} successfully self-corrected.")
                 else:
-                    results.extend(parsed1) # Fallback to original if correction JSON breaks
+                    results.extend(parsed1) 
                     if log_callback: log_callback(f"[WARNING] Self-correction parsing failed. Using original results.")
             else:
                 results.extend(parsed1)
@@ -171,6 +169,7 @@ Return ONLY a plain text JSON array adding 'qa_pass' (boolean) and 'qa_reason' (
             # ─── TOTAL FAILURE FALLBACK (1-by-1) ───
             if log_callback: log_callback(f"[WARNING] Batch {batch_idx + 1} completely failed formatting. Falling back to 1-by-1 processing...")
             
+            # This is the only time we clear the chat mid-loop, to reset a totally broken/corrupted hallucination loop
             if hasattr(wolfgang, 'clear_chat'): 
                 wolfgang.clear_chat()
 

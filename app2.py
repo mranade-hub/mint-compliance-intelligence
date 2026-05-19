@@ -24,7 +24,7 @@ from logger_utils import append_log
 # ─────────────────────────────────────────────
 st.set_page_config(
     layout="wide",
-    page_title="Compliance Intelligence",
+    page_title="Adherence Intelligence",
     page_icon="◈",
     initial_sidebar_state="expanded"
 )
@@ -482,7 +482,7 @@ def draw_table_row(pdf, data, widths, line_height=6, fill_color=None, text_color
     pdf.set_xy(15, y + row_h)
 
 def generate_pdf(company, results):
-    cat_name = results.get("project_category", "Compliance")
+    cat_name = results.get("project_category", "Adherence")
     pdf = ExecutivePDF(company, cat_name)
     
     # --- 1. COVER PAGE ---
@@ -735,10 +735,8 @@ def generate_pdf(company, results):
 with st.sidebar:
     st.markdown("""
     <div style="padding: 24px 0 20px 0; border-bottom: 1px solid rgba(99,179,237,0.1); margin-bottom: 24px;">
-        <div class="sidebar-logo">◈ C . I . P .</div>
+        <div class="sidebar-logo">◈ Adherence Intelligence Platform</div>
         <div style="font-size:0.72rem; color:#475569; margin-top:4px; letter-spacing:0.06em; text-transform:uppercase;">
-            Compliance Intelligence Platform
-        </div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -749,7 +747,7 @@ with st.sidebar:
     # --- NEW DROPDOWN FOR PROJECT CATEGORY ---
     project_category = st.selectbox(
         "Project Category",
-        ["MINT", "Solution Partner", "Track and Trace"],
+        ["MINT", "Solution Partner - T&T", "Track and Trace"],
         label_visibility="visible"
     )
 
@@ -864,7 +862,7 @@ with st.sidebar:
         st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
         st.markdown('<hr style="border-color:rgba(99,179,237,0.08);">', unsafe_allow_html=True)
 
-        if st.button("Run Compliance Audit", type="primary", use_container_width=True):
+        if st.button("Run Adherence Audit", type="primary", use_container_width=True):
             if not company:
                 st.error("Company name is required.")
             elif data_source == "Local ZIP Upload" and not target_zip_for_audit:
@@ -872,7 +870,7 @@ with st.sidebar:
             elif data_source == "Google Drive" and not drive_ready and not os.path.exists(f"downloads/{company}"):
                 st.error("Please extract files from Drive first.")
             else:
-                with st.status("Running compliance audit...", expanded=True) as status_box:
+                with st.status("Running adherence audit...", expanded=True) as status_box:
                     progress_bar = st.progress(0, text="Initializing...")
 
                     def file_logger(msg):
@@ -945,7 +943,7 @@ if st.session_state.audit_results is None:
             line-height: 1.1;
             margin-bottom: 16px;
         ">
-            Compliance Intelligence<br>
+            Adherence Intelligence<br>
             <span style="color: #3B82F6;">Dashboard</span>
         </div>
         <div style="
@@ -1006,7 +1004,7 @@ else:
     comp    = st.session_state.audit_company
     overall = results.get("overall_score", 0)
     maturity = maturity_level(overall)
-    cat_name = results.get("project_category", "Compliance")
+    cat_name = results.get("project_category", "Adherence")
 
     total_docs  = sum(len(p.get("documents", [])) for p in results.get("phases", {}).values())
     passed_docs = sum(1 for p in results.get("phases", {}).values() for d in p.get("documents", []) if d.get("pass"))
@@ -1031,7 +1029,7 @@ else:
         margin-bottom: 32px;
     ">
         <div style="font-size:0.72rem; font-weight:600; letter-spacing:0.15em; color:#3B82F6; text-transform:uppercase; margin-bottom:6px;">
-            Compliance Intelligence Report ({cat_name})
+            Adherence Intelligence Report ({cat_name})
         </div>
         <div style="
             font-size: 2rem;
@@ -1159,7 +1157,7 @@ else:
             ">
                 <div style="font-size:1.4rem; margin-bottom:8px;">✓</div>
                 <div style="font-size:0.88rem; color:#4ADE80; font-weight:600;">All documents verified</div>
-                <div style="font-size:0.78rem; color:#475569; margin-top:4px;">No compliance gaps detected.</div>
+                <div style="font-size:0.78rem; color:#475569; margin-top:4px;">No adherence gaps detected.</div>
             </div>
             """, unsafe_allow_html=True)
         else:
@@ -1266,7 +1264,7 @@ else:
         st.markdown("""
         <div class="export-card">
             <div class="export-card-title">Ledger CSV Export</div>
-            <div class="export-card-desc">Machine-readable compliance ledger for integration with your data warehouse or project tracking systems.</div>
+            <div class="export-card-desc">Machine-readable adherence ledger for integration with your data warehouse or project tracking systems.</div>
         </div>
         """, unsafe_allow_html=True)
         if not df_ledger.empty:
