@@ -366,6 +366,72 @@ def load_company_history(company):
                 continue
     return sorted(history, key=lambda x: x.get("audit_timestamp", ""), reverse=True)
 
+def get_last_audit_rfc3339(company):
+    """Fetches the latest audit timestamp and formats it correctly for Google Drive UTC comparison."""
+    history = load_company_history(company)
+    if not history:
+        return None
+    
+    last_audit = history[0]
+    ts_str = last_audit.get("audit_timestamp")
+
+    try:
+        # 1. Parse the local time string from your JSON file
+        dt = datetime.datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
+        
+        # 2. Tell Python this is local system time (IST)
+        dt_aware = dt.astimezone()
+        
+        # 3. Convert it safely to UTC
+        dt_utc = dt_aware.astimezone(datetime.timezone.utc)
+        
+        # 4. Format it to EXACTLY match Google Drive's API format 
+        # (YYYY-MM-DDTHH:MM:SS.000Z) so Python can compare the strings properly.
+        return dt_utc.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    except Exception:
+        return None
+    
+def merge_incremental_results(old_results, new_results):
+    """Blends the newly audited files into the historical master report."""
+    merged = old_results.copy()
+    
+    # --- ADD THIS LINE ---
+    # Ensure top-level metadata like project_category is always updated to the latest run
+    if "project_category" in new_results:
+        merged["project_category"] = new_results["project_category"]
+    
+    for phase, new_phase_data in new_results.get("phases", {}).items():
+        if phase not in merged["phases"]:
+            merged["phases"][phase] = new_phase_data
+            continue
+        
+        # Map existing documents for quick lookup
+        existing_docs = {d["document"]: i for i, d in enumerate(merged["phases"][phase]["documents"])}
+        
+        for new_doc in new_phase_data["documents"]:
+            # Only update the master report if Wolfgang actually audited a real file.
+            # If it says "N/A", it means the file wasn't downloaded (because it wasn't modified).
+            if new_doc.get("actual_folder") != "N/A" or new_doc.get("is_bypassed"):
+                if new_doc["document"] in existing_docs:
+                    idx = existing_docs[new_doc["document"]]
+                    merged["phases"][phase]["documents"][idx] = new_doc
+                else:
+                    merged["phases"][phase]["documents"].append(new_doc)
+        
+        # Recalculate the specific Phase Score
+        valid_docs = [d["score"] for d in merged["phases"][phase]["documents"] if not d.get("is_bypassed", False)]
+        merged["phases"][phase]["score"] = round(sum(valid_docs) / len(valid_docs), 2) if valid_docs else 100
+
+    # Recalculate Overall Adherence Score
+    valid_phase_scores = [merged["phases"][p]["score"] for p in merged["phases"]]
+    merged["overall_score"] = round(sum(valid_phase_scores) / len(valid_phase_scores), 2) if valid_phase_scores else 0
+    
+    # Update Risk Classification
+    score = merged["overall_score"]
+    merged["risk_level"] = "🟢 Low Risk" if score >= 85 else "🟡 Moderate Risk" if score >= 70 else "🟠 High Risk" if score >= 50 else "🔴 Critical Risk"
+    
+    return merged
+
 def top_gaps(results):
     gaps = []
     for phase, info in results.get("phases", {}).items():
@@ -839,6 +905,8 @@ with st.sidebar:
                 target_folder = target_options[st.selectbox("Target Folder", list(target_options.keys()))]
                 target_folder_name = target_folder["name"]
 
+                is_incremental = st.checkbox("Incremental Audit (Only fetch new/modified files)", value=True)
+
                 if st.button("Extract Files", use_container_width=True):
                     if company:
                         try:
@@ -846,8 +914,19 @@ with st.sidebar:
                             if os.path.exists(target_dir):
                                 shutil.rmtree(target_dir)
                             os.makedirs(target_dir, exist_ok=True)
+
                             with st.spinner("Downloading from Drive..."):
-                                download_folder_recursively(drive_service, target_folder["id"], target_dir)
+                                #DETERMINE THE DATE
+                                target_date = None
+                                if is_incremental:
+                                    target_date = get_last_audit_rfc3339(company)
+                                    if target_date:
+                                        st.toast(f"Fetching files modified after: {target_date}")
+                                    else:
+                                        st.toast("No previous audit found. Running full fetch.")
+
+                                download_folder_recursively(drive_service, target_folder["id"], target_dir, modified_after=target_date)
+
                             if os.path.exists("temp_downloads"):
                                 shutil.rmtree("temp_downloads")
                             st.success("Extraction complete.")
@@ -896,7 +975,8 @@ with st.sidebar:
 
                     pass_phase = None if forced_phase == "Auto-Detect" else forced_phase
                     
-                    results = run_pipeline(
+                    # 1. Run the pipeline on whatever is currently in the downloads folder
+                    raw_results = run_pipeline(
                         company,
                         project_category,
                         project_type,
@@ -905,10 +985,20 @@ with st.sidebar:
                         forced_phase=pass_phase,
                         folder_name=target_folder_name
                     )
-                    save_audit_history(company, results)
+
+                    #2. If it was an incremental audit, merge it!
+                    if data_source == "Google Drive" and is_incremental and get_last_audit_rfc3339(company):
+                        file_logger("[SYSTEM] Merging incremental results with master history...")
+                        previous_history = load_company_history(company)[0]
+                        final_results = merge_incremental_results(previous_history, raw_results)
+                    else:
+                        final_results = raw_results
+
+
+                    save_audit_history(company, final_results)
                     status_box.update(label="Audit complete.", state="complete", expanded=False)
 
-                st.session_state.audit_results = results
+                st.session_state.audit_results = final_results
                 st.session_state.audit_company = company
                 st.rerun()
 
@@ -1004,7 +1094,7 @@ else:
     comp    = st.session_state.audit_company
     overall = results.get("overall_score", 0)
     maturity = maturity_level(overall)
-    cat_name = results.get("project_category", "Adherence")
+    cat_name = results.get("project_category", "MINT")
 
     total_docs  = sum(len(p.get("documents", [])) for p in results.get("phases", {}).values())
     passed_docs = sum(1 for p in results.get("phases", {}).values() for d in p.get("documents", []) if d.get("pass"))

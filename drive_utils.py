@@ -11,7 +11,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CREDENTIALS_PATH = os.path.join(SCRIPT_DIR, "credentials.json")
 TOKEN_PATH = os.path.join(SCRIPT_DIR, "token.json")
 
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+SCOPES = ["https://www.googleapis.com/auth/drive"]
 
 GOOGLE_MIME_TYPES = {
     'application/vnd.google-apps.document': ('application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.docx'),
@@ -92,25 +92,34 @@ def download_file(service, file_id, file_name, mime_type, save_path):
     except Exception as e:
         print(f"Failed to download {file_name}: {e}")
 
-def download_folder_recursively(service, folder_id, current_local_path):
+def download_folder_recursively(service, folder_id, current_local_path, modified_after=None):
     if not os.path.exists(current_local_path):
         os.makedirs(current_local_path)
         
     page_token = None
     while True:
         q = f"'{folder_id}' in parents and trashed = false"
+        # 1. MUST be mimeType and modifiedTime (camelCase)
         response = service.files().list(
-            q=q, pageSize=200, fields="nextPageToken, files(id, name, mimeType)",
+            q=q, pageSize=200, fields="nextPageToken, files(id, name, mimeType, modifiedTime)",
             pageToken=page_token, supportsAllDrives=True, includeItemsFromAllDrives=True
         ).execute()
         
         items = response.get("files", [])
         for item in items:
-            if item['mimeType'] == 'application/vnd.google-apps.folder':
+            # 2. MUST be item['mimeType']
+            if item.get('mimeType') == 'application/vnd.google-apps.folder':
                 new_folder_path = os.path.join(current_local_path, item['name'])
-                download_folder_recursively(service, item['id'], new_folder_path)
+                download_folder_recursively(service, item['id'], new_folder_path, modified_after)
             else:
-                download_file(service, item['id'], item['name'], item['mimeType'], current_local_path)
+                if modified_after:
+                    # 3. MUST be modifiedTime
+                    file_mod_time = item.get('modifiedTime')
+                    if file_mod_time and file_mod_time <= modified_after:
+                        continue 
+                
+                # 4. MUST be item['mimeType']
+                download_file(service, item['id'], item['name'], item.get('mimeType'), current_local_path)
                 
         page_token = response.get("nextPageToken", None)
         if page_token is None:
