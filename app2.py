@@ -866,6 +866,9 @@ with st.sidebar:
     # ── ZIP Upload ──
     elif data_source == "Local ZIP Upload":
         uploaded_file = st.file_uploader("Upload ZIP Archive", type="zip")
+
+        is_incremental = st.checkbox("Incremental Audit (Only fetch new/modified files)", value=True)
+
         if uploaded_file:
             target_zip_for_audit = uploaded_file
             target_folder_name = uploaded_file.name
@@ -963,7 +966,7 @@ with st.sidebar:
                         )
 
                     if target_zip_for_audit:
-                        file_logger("[SYSTEM] Extracting uploaded archive...")
+                        file_logger("[SYSTEM] Inspecting uploaded archive for incremental changes...")
                         target_dir = f"downloads/{company}"
                         if os.path.exists(target_dir):
                             shutil.rmtree(target_dir)
@@ -971,7 +974,45 @@ with st.sidebar:
                         
                         target_zip_for_audit.seek(0)
                         with zipfile.ZipFile(target_zip_for_audit, "r") as zip_ref:
-                            zip_ref.extractall(target_dir)
+
+                            # 1. Get our target date (returns UTC string like '2026-05-19T09:36:20.000Z')
+                            target_date_str = None
+                            target_date_utc = None
+                            if is_incremental:
+                                target_date_str = get_last_audit_rfc3339(company)
+                                if target_date_str:
+                                    # Convert the UTC string back to a real datetime object for comparison
+                                    target_date_utc = datetime.datetime.strptime(target_date_str, "%Y-%m-%dT%H:%M:%S.000Z")
+                                    target_date_utc = target_date_utc.replace(tzinfo=datetime.timezone.utc)
+
+                            #2. Iterate through every file in the ZIP
+                            extracted_count = 0
+                            for zip_info in zip_ref.infolist():
+                                #Skip Directories
+                                if zip_info.is_dir():
+                                    continue
+
+                                should_extract = True
+
+                                if target_date_utc:
+                                    #ZIP timestamps are naive tuples: (YYYY, MM, DD, hh, mm, ss)
+                                    file_dt_naive = datetime.datetime(*zip_info.date_time)
+
+                                    #Assume the zip was created in the local system timezone(IST)
+                                    file_dt_local = file_dt_naive.astimezone()
+
+                                    #Convert to UTC to match our target threshold safely
+                                    file_dt_utc = file_dt_local.astimezone(datetime.timezone.utc)
+
+                                    if file_dt_utc <= target_date_utc:
+                                        should_extract = False
+
+                                if should_extract:
+                                    zip_ref.extract(zip_info, target_dir)
+                                    extracted_count += 1
+
+                            file_logger(f"[SYSTEM] Extracted {extracted_count} modified files from archive.")
+
 
                     pass_phase = None if forced_phase == "Auto-Detect" else forced_phase
                     
@@ -987,7 +1028,7 @@ with st.sidebar:
                     )
 
                     #2. If it was an incremental audit, merge it!
-                    if data_source == "Google Drive" and is_incremental and get_last_audit_rfc3339(company):
+                    if data_source in ["Google Drive", "Local ZIP Upload"] and is_incremental and get_last_audit_rfc3339(company):
                         file_logger("[SYSTEM] Merging incremental results with master history...")
                         previous_history = load_company_history(company)[0]
                         final_results = merge_incremental_results(previous_history, raw_results)
