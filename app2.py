@@ -395,18 +395,56 @@ def save_to_google_sheets(company, results):
         print(f"[ERROR] Google Sheets Exception: {e}")
 
 def load_company_history(company):
-    if not os.path.exists("audit_history"): return []
+    """Fetches previous audit history directly from the Google Sheets database."""
     history = []
-    for file in os.listdir("audit_history"):
-        if file.startswith(company) and file.endswith(".json"):
-            try:
-                with open(os.path.join("audit_history", file)) as f:
-                    data = json.load(f)
-                if "audit_timestamp" not in data:
-                    data["audit_timestamp"] = file.replace(f"{company}_", "").replace(".json", "")
-                history.append(data)
-            except Exception:
-                continue
+    try:
+        # 1. Paste your exact Spreadsheet ID here
+        SPREADSHEET_ID = "1JsRpaUtsssq5-PgpCnhjIDUAS4eO3dgoSWZn2ctWV-4"
+        RANGE_NAME = "Sheet1!A:F" 
+
+        # 2. Check for credentials
+        if not os.path.exists('token.json'):
+            print("[WARNING] token.json not found. Cannot fetch history from Sheets.")
+            return history
+
+        creds = Credentials.from_authorized_user_file('token.json')
+        service = build('sheets', 'v4', credentials=creds)
+
+        # 3. Pull all rows from the database
+        result = service.spreadsheets().values().get(
+            spreadsheetId=SPREADSHEET_ID,
+            range=RANGE_NAME
+        ).execute()
+        
+        rows = result.get('values', [])
+        
+        # 4. Filter and parse the data
+        for row in rows:
+            # Skip headers or incomplete rows, and filter by the requested company name (Case-insensitive)
+            # Column mapping: row[0]=Timestamp, row[1]=Company, row[5]=JSON
+            if len(row) >= 6 and row[1].strip().lower() == company.strip().lower():
+                try:
+                    # Extract the massive dictionary from the JSON string
+                    data = json.loads(row[5])
+                    
+                    # Ensure the timestamp formatting matches what the incremental feature expects ("YYYYMMDD_HHMMSS")
+                    if "audit_timestamp" not in data:
+                        try:
+                            # Convert Sheet's format back to the script's expected format
+                            dt = datetime.datetime.strptime(row[0], "%Y-%m-%d %H:%M:%S")
+                            data["audit_timestamp"] = dt.strftime("%Y%m%d_%H%M%S")
+                        except ValueError:
+                            data["audit_timestamp"] = row[0]
+                            
+                    history.append(data)
+                except json.JSONDecodeError:
+                    print(f"[WARNING] Could not parse the raw JSON data for a row belonging to {company}.")
+                    continue
+                    
+    except Exception as e:
+        print(f"[ERROR] Failed to fetch history from Google Sheets: {e}")
+
+    # 5. Sort the history from newest to oldest before returning
     return sorted(history, key=lambda x: x.get("audit_timestamp", ""), reverse=True)
 
 def get_last_audit_rfc3339(company):
