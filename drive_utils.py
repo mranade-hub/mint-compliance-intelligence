@@ -11,7 +11,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CREDENTIALS_PATH = os.path.join(SCRIPT_DIR, "credentials.json")
 TOKEN_PATH = os.path.join(SCRIPT_DIR, "token.json")
 
-SCOPES = ["https://www.googleapis.com/auth/drive"]
+SCOPES = [
+    'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/spreadsheets'
+]
 
 GOOGLE_MIME_TYPES = {
     'application/vnd.google-apps.document': ('application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.docx'),

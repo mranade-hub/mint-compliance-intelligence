@@ -6,6 +6,8 @@ import asyncio
 import re
 import shutil
 import zipfile
+from googleapiclient.discovery import build
+from google.oauth2.credentials import Credentials
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
@@ -350,6 +352,47 @@ def save_audit_history(company, results):
     results["audit_timestamp"] = timestamp
     with open(f"audit_history/{company}_{timestamp}.json", "w") as f:
         json.dump(results, f)
+
+def save_to_google_sheets(company, results):
+    """Appends the audit record as a new row in a Google Sheet."""
+    try:
+        # 1. Paste your copied Spreadsheet ID here
+        SPREADSHEET_ID = "1JsRpaUtsssq5-PgpCnhjIDUAS4eO3dgoSWZn2ctWV-4"
+        RANGE_NAME = "Sheet1!A:F" # Ensure your sheet tab is named "Sheet1"
+
+        # 2. Use your existing Google auth token
+        if os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json')
+        else:
+            print("[ERROR] token.json not found. Run Drive extraction first to generate it.")
+            return
+
+        # 3. Connect to the Sheets API
+        service = build('sheets', 'v4', credentials=creds)
+
+        # 4. Extract data
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        category = str(results.get("project_category", "Unknown"))
+        score = float(results.get("overall_score", 0.0))
+        risk = str(results.get("risk_level", "Unknown"))
+        raw_json = json.dumps(results)
+
+        # 5. Format as a row
+        values = [[timestamp, company, category, score, risk, raw_json]]
+        body = {'values': values}
+
+        # 6. Append to the bottom of the sheet
+        result = service.spreadsheets().values().append(
+            spreadsheetId=SPREADSHEET_ID, 
+            range=RANGE_NAME,
+            valueInputOption="USER_ENTERED", 
+            body=body
+        ).execute()
+        
+        print(f"[SUCCESS] Inserted into Google Sheets Database.")
+        
+    except Exception as e:
+        print(f"[ERROR] Google Sheets Exception: {e}")
 
 def load_company_history(company):
     if not os.path.exists("audit_history"): return []
@@ -858,7 +901,7 @@ with st.sidebar:
                     for h in history
                 }
                 selected_key = st.selectbox("Select Audit Record", list(options.keys()))
-                if st.button("Load Audit", type="primary", use_container_width=True):
+                if st.button("Load Audit", type="primary", width="stretch"):
                     st.session_state.audit_results = options[selected_key]
                     st.session_state.audit_company = company
                     st.rerun()
@@ -878,7 +921,7 @@ with st.sidebar:
     elif data_source == "Google Drive":
         search_term = st.text_input("Search Drive", placeholder="Enter company folder name")
 
-        if st.button("Search Drive", use_container_width=True):
+        if st.button("Search Drive", width="stretch"):
             if search_term:
                 try:
                     drive_service = get_drive_service()
@@ -910,7 +953,7 @@ with st.sidebar:
 
                 is_incremental = st.checkbox("Incremental Audit (Only fetch new/modified files)", value=True)
 
-                if st.button("Extract Files", use_container_width=True):
+                if st.button("Extract Files", width="stretch"):
                     if company:
                         try:
                             target_dir = f"downloads/{company}"
@@ -944,7 +987,7 @@ with st.sidebar:
         st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
         st.markdown('<hr style="border-color:rgba(99,179,237,0.08);">', unsafe_allow_html=True)
 
-        if st.button("Run Adherence Audit", type="primary", use_container_width=True):
+        if st.button("Run Adherence Audit", type="primary", width="stretch"):
             if not company:
                 st.error("Company name is required.")
             elif data_source == "Local ZIP Upload" and not target_zip_for_audit:
@@ -1037,6 +1080,9 @@ with st.sidebar:
 
 
                     save_audit_history(company, final_results)
+
+                    file_logger("[SYSTEM] Appending record to Google Sheets Ledger...")
+                    save_to_google_sheets(company, final_results)
                     status_box.update(label="Audit complete.", state="complete", expanded=False)
 
                 st.session_state.audit_results = final_results
@@ -1046,7 +1092,7 @@ with st.sidebar:
     # ── Reset ──
     if st.session_state.audit_results is not None:
         st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
-        if st.button("Clear Dashboard", use_container_width=True):
+        if st.button("Clear Dashboard", width="stretch"):
             st.session_state.audit_results = None
             st.session_state.audit_company = None
             st.rerun()
@@ -1270,7 +1316,7 @@ else:
                 ),
                 showlegend=False,
             )
-            st.plotly_chart(fig_bar, use_container_width=True, config={"displayModeBar": False})
+            st.plotly_chart(fig_bar, width="stretch", config={"displayModeBar": False})
 
     with gap_col:
         st.markdown('<div class="mint-section-label">Action Required</div>', unsafe_allow_html=True)
@@ -1358,7 +1404,7 @@ else:
                 ),
                 "Status": st.column_config.TextColumn("Status"),
             },
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             height=380,
         )
@@ -1388,7 +1434,7 @@ else:
             data=pdf_bytes,
             file_name=f"{clean_text(comp)}_{clean_text(cat_name).replace(' ', '_')}_Adherence_Report.pdf",
             mime="application/pdf",
-            use_container_width=True,
+            width="stretch",
         )
 
     with ex_col2:
@@ -1405,7 +1451,7 @@ else:
                 data=csv_bytes,
                 file_name=f"{clean_text(comp)}_Adherence_Ledger.csv",
                 mime="text/csv",
-                use_container_width=True,
+                width="stretch",
             )
 
     st.markdown('<div style="height:48px;"></div>', unsafe_allow_html=True)
