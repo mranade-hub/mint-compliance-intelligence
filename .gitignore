@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
-venv/
+.venv/
 env/
 .env
 
@@ -30,3 +30,7 @@ Thumbs.db
 logo.png
 old_token.json
 bq_key.json
+
+dist/
+build/
+AdherenceBot.spec
