@@ -95,14 +95,15 @@ def download_file(service, file_id, file_name, mime_type, save_path):
     except Exception as e:
         print(f"Failed to download {file_name}: {e}")
 
-def download_folder_recursively(service, folder_id, current_local_path, modified_after=None):
+def get_files_list(service, folder_id, current_local_path, modified_after=None):
+    """Recursively maps all files and creates local directories before downloading."""
+    files_to_download = []
     if not os.path.exists(current_local_path):
         os.makedirs(current_local_path)
         
     page_token = None
     while True:
         q = f"'{folder_id}' in parents and trashed = false"
-        # 1. MUST be mimeType and modifiedTime (camelCase)
         response = service.files().list(
             q=q, pageSize=200, fields="nextPageToken, files(id, name, mimeType, modifiedTime)",
             pageToken=page_token, supportsAllDrives=True, includeItemsFromAllDrives=True
@@ -110,20 +111,42 @@ def download_folder_recursively(service, folder_id, current_local_path, modified
         
         items = response.get("files", [])
         for item in items:
-            # 2. MUST be item['mimeType']
             if item.get('mimeType') == 'application/vnd.google-apps.folder':
                 new_folder_path = os.path.join(current_local_path, item['name'])
-                download_folder_recursively(service, item['id'], new_folder_path, modified_after)
+                files_to_download.extend(get_files_list(service, item['id'], new_folder_path, modified_after))
             else:
                 if modified_after:
-                    # 3. MUST be modifiedTime
                     file_mod_time = item.get('modifiedTime')
                     if file_mod_time and file_mod_time <= modified_after:
                         continue 
                 
-                # 4. MUST be item['mimeType']
-                download_file(service, item['id'], item['name'], item.get('mimeType'), current_local_path)
+                files_to_download.append({
+                    'id': item['id'],
+                    'name': item['name'],
+                    'mimeType': item.get('mimeType'),
+                    'save_path': current_local_path
+                })
                 
         page_token = response.get("nextPageToken", None)
         if page_token is None:
             break
+    return files_to_download
+
+def download_folder_recursively(service, folder_id, current_local_path, modified_after=None, progress_callback=None):
+    """Maps the folder structure, counts the files, and passes progress to the UI."""
+    if progress_callback:
+        progress_callback(0, 1, "Mapping folder structure and counting files...")
+        
+    # Pass 1: Build the list of files to download
+    files = get_files_list(service, folder_id, current_local_path, modified_after)
+    total = len(files)
+    
+    # Pass 2: Download each file and update progress
+    for i, f in enumerate(files):
+        if progress_callback:
+            # Add 1 to current index to show completion correctly (e.g. 1/10, 2/10)
+            progress_callback(i + 1, total, f"Downloading: {f['name']}")
+        download_file(service, f['id'], f['name'], f['mimeType'], f['save_path'])
+        
+    if progress_callback:
+        progress_callback(total, max(total, 1), "Drive extraction complete!")

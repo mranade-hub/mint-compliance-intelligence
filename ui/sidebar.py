@@ -130,16 +130,34 @@ def render_sidebar():
                                     shutil.rmtree(target_dir)
                                 os.makedirs(target_dir, exist_ok=True)
 
-                                with st.spinner("Downloading from Drive..."):
-                                    target_date = None
-                                    if is_incremental:
-                                        target_date = get_last_audit_rfc3339(company)
-                                        if target_date:
-                                            st.toast(f"Fetching files modified after: {target_date}")
-                                        else:
-                                            st.toast("No previous audit found. Running full fetch.")
+                                target_date = None
+                                if is_incremental:
+                                    target_date = get_last_audit_rfc3339(company)
+                                    if target_date:
+                                        st.toast(f"Fetching files modified after: {target_date}")
+                                    else:
+                                        st.toast("No previous audit found. Running full fetch.")
 
-                                    download_folder_recursively(drive_service, target_folder["id"], target_dir, modified_after=target_date)
+                                # ── NEW: Progress Bar Logic ──
+                                download_progress = st.progress(0, text="Connecting to Google Drive...")
+                                
+                                def drive_progress(current, total, msg):
+                                    safe_total = max(total, 1)
+                                    pct = int((current / safe_total) * 100)
+                                    # Constrain value to 1.0 just in case
+                                    clamped_val = min(current / safe_total, 1.0)
+                                    download_progress.progress(clamped_val, text=f"{pct}% - {msg}")
+
+                                download_folder_recursively(
+                                    drive_service, 
+                                    target_folder["id"], 
+                                    target_dir, 
+                                    modified_after=target_date,
+                                    progress_callback=drive_progress
+                                )
+                                
+                                # Clear the progress bar after completion
+                                download_progress.empty()
 
                                 if os.path.exists("temp_downloads"):
                                     shutil.rmtree("temp_downloads")
@@ -225,10 +243,15 @@ def render_sidebar():
                             folder_name=target_folder_name
                         )
 
-                        if data_source in ["Google Drive", "Local ZIP Upload"] and is_incremental and get_last_audit_rfc3339(company):
-                            file_logger("[SYSTEM] Merging incremental results with master history...")
-                            previous_history = load_company_history(company)[0]
-                            final_results = merge_incremental_results(previous_history, raw_results)
+                        # Note: Included the optimization from previous step here!
+                        if data_source in ["Google Drive", "Local ZIP Upload"] and is_incremental:
+                            history = load_company_history(company)
+                            if history:
+                                file_logger("[SYSTEM] Merging incremental results with master history...")
+                                previous_history = history[0]
+                                final_results = merge_incremental_results(previous_history, raw_results)
+                            else:
+                                final_results = raw_results
                         else:
                             final_results = raw_results
 
